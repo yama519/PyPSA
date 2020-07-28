@@ -52,5 +52,5 @@ q = p*(np.tan((np.arccos(power_factor, dtype=np.float64)), dtype=np.float64))
 #
 #S = np.sqrt((p)**2 + q**2)
 #
-#print('S', S, 's_nom', s_nom)
+print('S' 's_nom')
 
