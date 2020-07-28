@@ -191,4 +191,5 @@ def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
     assert_pf_results_are_almost_equal(n8, n9)
 
 
-test_PyPSA_pf_results_with_controllers_against_CERBERUS_network()
+if __name__ == "__main__":
+    test_PyPSA_pf_results_with_controllers_against_CERBERUS_network()
