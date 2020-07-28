@@ -107,45 +107,6 @@ def assert_pf_results_are_almost_equal(n1, n2):
 
 
 
-
-# import pypsa
-# import pandas as pd
-# import sys
-# import os
-# from numpy.testing import assert_array_almost_equal as equal
-
-# solvers = ['glpk'] if sys.platform == 'win32' else ['cbc', 'glpk']
-
-
-# def test_opf():
-
-#     csv_folder_name = os.path.join(os.path.dirname(__file__), "..", "examples",
-#                                    "opf-storage-hvdc","opf-storage-data")
-
-#     n = pypsa.Network(csv_folder_name)
-
-#     target_path = os.path.join(csv_folder_name,"results","generators-p.csv")
-
-#     target_gen_p = pd.read_csv(target_path, index_col=0)
-
-#     #test results were generated with GLPK and other solvers may differ
-#     for solver_name in solvers:
-
-#         n.lopf(solver_name=solver_name, pyomo=True)
-
-#         equal(n.generators_t.p.reindex_like(target_gen_p), target_gen_p, decimal=2)
-
-#     if sys.version_info.major >= 3:
-
-#         for solver_name in solvers:
-
-#             status, cond = n.lopf(solver_name=solver_name, pyomo=False)
-#             assert status == 'ok'
-#             equal(n.generators_t.p.reindex_like(target_gen_p), target_gen_p,
-#                   decimal=2)
-
-
-
 def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
     """
     test/network contains network results with control and without control from
@@ -156,16 +117,11 @@ def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
     of cerberus network and run PyPSA pf on it and then compared with the cerberus
     results of that controller (for each controller separately).
     """
-    # pf results with no controller in Cerberus as n1
-    # cerberus_path = os.path.join('networks', 'results_no_c', 'citygrid')
-    # n1 = pypsa.Network(cerberus_path, ignore_standard_types=True)
 
     cerberus_path = os.path.join(os.path.dirname(__file__), "..", "test",
                                     "networks","results_no_c", "citygrid")
 
     n1 = pypsa.Network(cerberus_path, ignore_standard_types=True)
-
-
 
 
     # copy the network and run pf in PyPSA without controllers as n2
