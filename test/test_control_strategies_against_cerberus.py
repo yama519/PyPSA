@@ -1,32 +1,20 @@
 """Test power flow (pf) results of inverter control strategies namely; fixed
 power factor (fixed_cosphi), power factors as a fucntion of active power
-(cosphi_p), reactive power as a function of voltage (q_v or Q(U)), Active power
-as a function of voltage P(V) or power curtailment against Cerberus.
-Cerberus is a power flow software which has the above mentioned control
+(cosphi_p) and reactive power as a function of voltage (q_v or Q(U)) against
+Cerberus. Cerberus is a power flow software which has the above mentioned control
 strategies as features. In an example of four generating units (PV or wind..)
-first, pf with out control is run and the results are converted to PyPSA network
-(csv files) which are saved in test/networks/results_no_c folder, then controllers
-are applied one by one on the same network in Cerberus and pf is run for each case,
-the results are saved in test/networks/... for each controller in a seperate folder.
-Same way in PyPSA each controller is applied on test/networks/results_no_c network
-seperately and the pf results are compared with the pf results with the same
-controller in Cerberus, (results_q_v_c, results_cosphi_p_c...).
-i.e:
+first, pf with out contro is run and the results are converted to PyPSA csv files
+which are saved in test/networks/results_no_c folder, then controllers are
+applied one by one and pf is run for each case and the results are saved in
+test/networks/... in seperate folder for each controller respectively, including
+their dsn files. Dsn file is the Cerberus file format. And the test are as follow.
 
-In test/networks there are four folders which contain cerberus pf results for the
-normal pf with no controller and for each controller controller seperately:
+In test/networks there are four folders which contain cerberus pf results:
 
     results_no_c = normal pf with out controller
     results_with_cosphi_p = pf with power_factor as a function of active power
     results_with_fixed_pf = pf with fixed power factor controller
     results_with_q_v = pf with Q(U) controller
-    results_with_p_v = pf with P(V) controller
-
-In PyPSA; first pf is run on the Cerberus network which is in "results_no_c" and
-then pf results (From Cerberus and PyPSA) are compared (both with no controller).
-Then "cosphi_p" controller is applied in the same network "results_no_c" and the
-result of this pf in PyPSA is compared with Cerberus result of the same controller
-which is in results_with_cosphi_p folder. Same for other controllers is followed.
 """
 # importing important libraries
 import os
@@ -106,7 +94,6 @@ def assert_pf_results_are_almost_equal(n1, n2):
         err_msg='transformers q0 values violate')
 
 
-
 def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
     """
     test/network contains network results with control and without control from
@@ -117,12 +104,11 @@ def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
     of cerberus network and run PyPSA pf on it and then compared with the cerberus
     results of that controller (for each controller separately).
     """
-
+    # pf results of pf without controller in Cerberus
     cerberus_path = os.path.join(os.path.dirname(__file__), "..", "test",
                                     "networks","results_no_c", "citygrid")
 
     n1 = pypsa.Network(cerberus_path, ignore_standard_types=True)
-
 
     # copy the network and run pf in PyPSA without controllers as n2
     n2 = n1.copy()
@@ -179,21 +165,6 @@ def test_PyPSA_pf_results_with_controllers_against_CERBERUS_network():
 
     # compare the two pf results (n7-cerberus and n8-PyPSA)
     assert_pf_results_are_almost_equal(n7, n8)
-
-    # P(V) or p_v controller pf results in Cerberus as n8
-    cerberus_path_p_v_control = os.path.join(os.path.dirname(__file__), "..", "test",
-                                    "networks","results_with_p_v", "citygrid")
-    n8 = pypsa.Network(cerberus_path_p_v_control, ignore_standard_types=True)
-
-    # copy n1 network, set controller parameters same as Cerberus and run pf in PyPSA as n9
-    n9 = n1.copy()
-    n9.generators.control_strategy = "p_v"
-    n9.generators.p_set = 0.03
-    n9.generators.v_pu_cr = 0.95  # the per unit set point where power curtailment starts
-    n9.generators.v_max_curtail = 1.02  # the point where power curtailment reaches 100%
-    n9.pf(x_tol_outer=1e-6, inverter_control=True)
-    assert_pf_results_are_almost_equal(n8, n9)
-
 
 if __name__ == "__main__":
     test_PyPSA_pf_results_with_controllers_against_CERBERUS_network()
