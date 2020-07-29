@@ -15,7 +15,6 @@
 
 """Power flow functionality.
 """
-
 from six import iterkeys
 from six.moves.collections_abc import Sequence
 
@@ -41,7 +40,7 @@ from operator import itemgetter
 import time
 
 from .descriptors import get_switchable_as_dense, allocate_series_dataframes, Dict, zsum, degree
-
+from .control import apply_controller, prepare_controlled_index_dict
 pd.Series.zsum = zsum
 
 def normed(s): return s/s.sum()
@@ -170,8 +169,8 @@ def _network_prepare_and_run_pf(network, snapshots, skip_pre, linear=False,
     if not linear:
         return Dict({ 'n_iter': itdf, 'error': difdf, 'converged': cnvdf })
 
-def network_pf(network, snapshots=None, skip_pre=False, x_tol=1e-6, use_seed=False,
-               distribute_slack=False, slack_weights='p_set'):
+def network_pf(network, snapshots=None, skip_pre=False, x_tol=1e-6, x_tol_outer=1e-3, use_seed=False,
+               distribute_slack=False, slack_weights='p_set', inverter_control=False):
     """
     Full non-linear power flow for generic network.
 
@@ -184,6 +183,9 @@ def network_pf(network, snapshots=None, skip_pre=False, x_tol=1e-6, use_seed=Fal
         Skip the preliminary steps of computing topology, calculating dependent values and finding bus controls.
     x_tol: float
         Tolerance for Newton-Raphson power flow.
+    x_tol_outer: float
+        Tolerance for outer loop voltage difference between the two successive power flow iterations as a result
+        of applying voltage dependent controller such as reactive power as a function of voltage "q_v".
     use_seed : bool, default False
         Use a seed for the initial guess for the Newton-Raphson algorithm.
     distribute_slack : bool, default False
@@ -201,6 +203,9 @@ def network_pf(network, snapshots=None, skip_pre=False, x_tol=1e-6, use_seed=Fal
         corresponding subnetwork as index/keys.
         When specifying custom weights with buses as index/keys the slack power of a bus is distributed
         among its generators in proportion to their nominal capacity (``p_nom``) if given, otherwise evenly.
+    inverter_control : bool, default False
+        If ``True``, activates outerloop which applies inverter control strategies (control strategy chosen in
+        n.components.control_strategy) in the power flow.
 
     Returns
     -------
@@ -210,9 +215,9 @@ def network_pf(network, snapshots=None, skip_pre=False, x_tol=1e-6, use_seed=Fal
         iteration error for each snapshot (rows) and sub_network (columns)
     """
 
-    return _network_prepare_and_run_pf(network, snapshots, skip_pre, linear=False, x_tol=x_tol,
+    return _network_prepare_and_run_pf(network, snapshots, skip_pre, linear=False, x_tol_outer=x_tol_outer, x_tol=x_tol,
                                        use_seed=use_seed, distribute_slack=distribute_slack,
-                                       slack_weights=slack_weights)
+                                       slack_weights=slack_weights, inverter_control=inverter_control)
 
 
 def newton_raphson_sparse(f, guess, dfdx, x_tol=1e-10, lim_iter=100, distribute_slack=False, slack_weights=None):
@@ -316,8 +321,8 @@ def sub_network_pf_singlebus(sub_network, snapshots=None, skip_pre=False,
     return 0, 0., True # dummy substitute for newton raphson output
 
 
-def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_seed=False,
-                   distribute_slack=False, slack_weights='p_set'):
+def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_tol_outer=1e-3, use_seed=False,
+                   distribute_slack=False, slack_weights='p_set', inverter_control=False):
     """
     Non-linear power flow for connected sub-network.
 
@@ -330,6 +335,9 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
         Skip the preliminary steps of computing topology, calculating dependent values and finding bus controls.
     x_tol: float
         Tolerance for Newton-Raphson power flow.
+    x_tol_outer: float
+        Tolerance for outer loop voltage difference between the two successive power flow iterations as a result
+        of applying voltage dependent controller such as reactive power as a function of voltage "q_v".
     use_seed : bool, default False
         Use a seed for the initial guess for the Newton-Raphson algorithm.
     distribute_slack : bool, default False
@@ -344,6 +352,9 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
         that has the buses or the generators of the subnetwork as index/keys.
         When using custom weights with buses as index/keys the slack power of a bus is distributed
         among its generators in proportion to their nominal capacity (``p_nom``) if given, otherwise evenly.
+    inverter_control : bool, default False
+        If ``True``, activates outerloop which applies inverter control strategies (control strategy chosen in
+        n.components.control_strategy) in the power flow.
 
     Returns
     -------
@@ -500,30 +511,46 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, use_
     iters = pd.Series(0, index=snapshots)
     diffs = pd.Series(index=snapshots)
     convs = pd.Series(False, index=snapshots)
+
+    # prepare controllers if any and enable outer loop if voltage dependent controller present
+    n_trials_max, dict_controlled_index = prepare_controlled_index_dict(network, sub_network, inverter_control, snapshots)
     for i, now in enumerate(snapshots):
-        p = network.buses_t.p.loc[now,buses_o]
-        q = network.buses_t.q.loc[now,buses_o]
-        ss[i] = s = p + 1j*q
+        voltage_difference, n_trials, n_iter_overall = (1, 0, 0)
+        start_outer = time.time()
+        while voltage_difference > x_tol_outer and n_trials <= n_trials_max:
+            n_trials += 1
 
-        #Make a guess for what we don't know: V_ang for PV and PQs and v_mag_pu for PQ buses
-        guess = r_[network.buses_t.v_ang.loc[now,sub_network.pvpqs],network.buses_t.v_mag_pu.loc[now,sub_network.pqs]]
+            if inverter_control:
+                previous_v_mag_pu_voltage_dependent_controller = apply_controller(network, now, n_trials, n_trials_max, dict_controlled_index)
 
-        if distribute_slack:
-            guess = np.append(guess, [0]) # for total slack power
-            if isinstance(slack_weights, str) and slack_weights == 'p_set':
-                # snapshot-dependent slack weights
-                slack_args["slack_weights"] = slack_weights_calc.loc[now]
-            else:
-                slack_args["slack_weights"] = slack_weights_calc
-
-        #Now try and solve
-        start = time.time()
-        roots[i], n_iter, diff, converged = newton_raphson_sparse(f, guess, dfdx, x_tol=x_tol, **slack_args)
-        logger.info("Newton-Raphson solved in %d iterations with error of %f in %f seconds", n_iter,diff,time.time()-start)
-        iters[now] = n_iter
-        diffs[now] = diff
-        convs[now] = converged
-
+            p = network.buses_t.p.loc[now,buses_o]
+            q = network.buses_t.q.loc[now,buses_o]
+            ss[i] = s = p + 1j*q
+            #Make a guess for what we don't know: V_ang for PV and PQs and v_mag_pu for PQ buses
+            guess = r_[network.buses_t.v_ang.loc[now,sub_network.pvpqs],network.buses_t.v_mag_pu.loc[now,sub_network.pqs]]
+    
+            if distribute_slack:
+                guess = np.append(guess, [0]) # for total slack power
+                if isinstance(slack_weights, str) and slack_weights == 'p_set':
+                    # snapshot-dependent slack weights
+                    slack_args["slack_weights"] = slack_weights_calc.loc[now]
+                else:
+                    slack_args["slack_weights"] = slack_weights_calc
+    
+            #Now try and solve
+            start = time.time()
+            roots[i], n_iter, diff, converged = newton_raphson_sparse(f, guess, dfdx, x_tol=x_tol, **slack_args)
+            n_iter_overall += n_iter
+            if not inverter_control:
+                logger.info("Newton-Raphson solved in %d iterations with error of %f in %f seconds", n_iter,diff,time.time()-start)
+            iters[now] = n_iter
+            diffs[now] = diff
+            convs[now] = converged
+            if n_trials_max > 1:
+                voltage_difference = (abs(network.buses_t.v_mag_pu.loc[now] - previous_v_mag_pu_voltage_dependent_controller)).max()
+        if inverter_control:
+            logger.info("Newton-Raphson solved in %d iterations and %d outer loops with error of %f in %f seconds",
+                n_iter_overall, n_trials, diff, time.time() - start_outer)
 
     #now set everything
     if distribute_slack:

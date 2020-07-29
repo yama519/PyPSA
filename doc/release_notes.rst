@@ -1,4 +1,4 @@
-#######################
+﻿#######################
 Release Notes
 #######################
 
@@ -31,6 +31,12 @@ This release contains bug fixes and extensions to the features for optimization 
 
 * When solving ``n.lopf(pyomo=False, store_basis=True, solver_name="cplex")`` an error raised by trying to store a non-existing basis is caught.
 
+* Integration of inverter control strategies for nonlinear power flow:
+  Inverter control strategies such as: fixed power factor, reactive power as a
+  function of voltage Q(V), power factor as a function of active power can be 
+  implemented on Load, Generator, Store and StorageUnit components by specifying
+  them as new attributes in these components.
+=======
 * Add compatibility for Pyomo 5.7. This is also the new minimum requirement.
 
 * Fixed bug when saving dual variables of the line volume limit. Now using dual from the second last iteration in ``pypsa.linopf``,
@@ -45,6 +51,7 @@ This release contains bug fixes and extensions to the features for optimization 
 Thanks to Pietro Belotti from FICO for adding the Xpress support, to Fabian Neumann (KIT) and Fabian Hofmann (FIAS) for all their
 hard work on this release, and to all those who fixed bugs and reported issues.
 
+>>>>>>> 531b7f4edb515a8cb916dfcbe785796b3b662ed0
 
 PyPSA 0.17.0 (23rd March 2020)
 ================================
