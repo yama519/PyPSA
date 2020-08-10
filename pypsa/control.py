@@ -229,7 +229,17 @@ def apply_q_v(n, snapshot, c, c_attrs, n_trials_max, n_trials):
 
 def apply_oltc(n, snapshot, c_attrs, calculate_Y, sub_network, skip_pre):
     """
-    On Load Tap Changer Transformer.
+    On Load Tap Changer Transformer (OLTC). Supports three conditions. 1. if no
+    node is give as control node to "ctrl_node" attribute of transformer, OLTC
+    assumes that the bus at which secondary of transformer is connected is the
+    controlled node. OR if any other bus name is give as input in "ctrl_node"
+    attribute, controller will choose the tap position to bring the voltage withing
+    the range which is determined by "deadband" and "v_set". 3 If multiple buses
+    are given as controlled nodes, controller finds the min and max voltages of
+    the controlled buses and choose an optimum tap to bring the measured v_min
+    and v_max withing the range determined by "v_min" and "v_max" attributes,
+    where "v_min" and "v_max" are the minimum and maximum allowed voltages of
+    the network.
 
     Parameters
     ----------
@@ -345,7 +355,7 @@ def apply_oltc(n, snapshot, c_attrs, calculate_Y, sub_network, skip_pre):
                             v_pu_ctrl_nodes.index.tolist(), ind, opt_tap)
 
         # set the optimum tap position calculated either from single or multiple
-        # node part, and also recalculte admittance matrix.
+        # node part, and  recalculte admittance matrix.
         if calc_admittance_matrix:
             n.transformers.loc[ind, 'tap_position'] = opt_tap
             n.transformers_t.opt_tap_position.loc[snapshot, ind] = opt_tap
@@ -360,6 +370,7 @@ def apply_p_v(n, snapshot, c, c_attrs, n_trials_max, n_trials):
     """
     Reactive power as a function of voltage Q(V).
     reference : https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=6096349
+    DOI Link :  10.1109/JPHOTOV.2011.2174821
 
     This controller basically limits power generation or power consumption for
     the controlled components based on the connected bus voltages to avoid grid
@@ -411,9 +422,9 @@ def apply_p_v(n, snapshot, c, c_attrs, n_trials_max, n_trials):
 
     # Flag for the case where the component consumes active power from the grid
     grid_consumption = (((c == 'Load') and (np.sign(p_input) > 0).any()) or (
-        (c == 'StorageUnit' or c == 'Generator' or c == 'Store') and (
+        (c == 'StorageUnit' or c == 'Store') and (
             np.sign(p_input) < 0).any()))
-
+# TODO What should be the reaction of controller for generators with -p_set?
     # Flag for the case where the component injects active power to the grid
     grid_injection = (((c == 'Load') and (np.sign(p_input) < 0).any()) or (
         (c == 'StorageUnit' or c == 'Generator' or c == 'Store') and (
@@ -752,9 +763,10 @@ def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, o
                     c.pnl.power_factor = c.pnl.power_factor.reindex(columns=c.ind)
                     c.pnl['power_factor'].loc[snapshots, c.ind] = power_factor
 
-                # exclude slack generator to be controlled
+                # exclude slack generator to be controlled  np.sign(n.generators_t.p_set) < 0).any()
                 if c.list_name == 'generators':
                     c.df.loc[c.df.control == 'Slack', 'control_strategy'] = ''
+
                 # if voltage dep. controller exist,find the bus name
                 n_trials_max = np.where(
                       c.df.control_strategy.isin(['q_v', 'p_v']).any(), 30, 0)
