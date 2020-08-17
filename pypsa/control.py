@@ -551,8 +551,8 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
     injection in MW.
     """
     # required parameters
-    damper = n.df(c).loc[p_inj.index, 'damper']
-    dy_damper = np.select([n_trials>=30, n_trials>20, n_trials>15], [0.7, 0.8, 0.9], default=damper)
+# TODO Hey jkaehler what is your idea?  dynamic damper for convergence of this controller
+    # dy_damper = np.select([n_trials>=30, n_trials>20, n_trials>15], [0.7, 0.8, 0.9], default=damper)
     v_pu_cr = n.df(c).loc[p_inj.index, 'v_pu_cr']
     v_max_curtail = n.df(c).loc[p_inj.index, 'v_max_curtail']
     # find the amount of allowed power consumption in % from the droop
@@ -561,7 +561,7 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
             100, 0, (100-(100/(v_max_curtail-v_pu_cr))*(v_pu_bus-v_pu_cr))])
 
     # find the amount of allowed power consumption in MW
-    p_out = ((pperpmax*(p_inj)) / 100)*dy_damper
+    p_out = ((pperpmax*(p_inj)) / 100)
     # update the active power contribution of the controlled indexes in network
     _set_controller_outputs_to_n(
         n, c, p_inj.index, snapshot, ctrl_p_out=True, p_out=p_out)
