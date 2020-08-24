@@ -665,7 +665,8 @@ def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
                     apply_p_v(n, now, c, index, n_trials_max, n_trials)
 
             elif controller == "oltc" and n_trials > 1 and token != "p_v":
-                switch = np.where(controller == "q_v", v_diff.max() < x_tol_outer, 1)
+                switch = np.where("q_v" in dict_controlled_index,
+                                  v_diff.max() < x_tol_outer, 1)
 
                 if switch:
                     tap_changed = apply_oltc(
