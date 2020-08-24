@@ -21,7 +21,7 @@ def find_allowable_q(p, power_factor, s_nom):
     This values are returned to controller in order to check and make sure that
     the inverter equation s_nom = np.sqrt((p**2 + q**2) is not violated.
     """
-    # Calculate reactive power that controller want ot compensate initially
+    # Calculate reactive power that controller want to compensate initially
     q = p.mul(np.tan((np.arccos(power_factor, dtype=np.float64)),
                      dtype=np.float64))
     # find inverter q capacity according to power factor provided
@@ -229,7 +229,8 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
     p_out = None
     ctrl_p_out = False
     q_inv_cap, q_allowable, q = find_allowable_q(p_input, params['power_factor'], params['s_nom'])
-
+    dy_damper = np.select([n_trials>=45, n_trials>=40, n_trials>=30, n_trials>20, n_trials>15], [0.1, 0.3, 0.5, 0.8, 0.9], default=params[
+            'damper'])
     # calculation of maximum q compensation in % based on bus v_pu_bus
     curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']), (v_pu_bus >= params['v1']) & (
             v_pu_bus <= params['v2']), (v_pu_bus > params['v2']) & (v_pu_bus <= params['v3']), (v_pu_bus > params['v3'])
@@ -237,7 +238,7 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
                 v_pu_bus - params['v1']), 0, -100 * (v_pu_bus - params['v3']) / (params['v4'] - params['v3']), -100])
     # calculation of q
     q_out = (((curve_q_set_in_percentage * q_allowable) / 100) * params[
-            'damper'] * params['sign'])
+            'damper'] * params['sign'])*dy_damper
     # check if there is need to reduce p_set due to q need
     if (q > q_inv_cap).any().any():
         ctrl_p_out = True
@@ -245,7 +246,6 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
 
     _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=ctrl_p_out,
                                  ctrl_q_out=True, p_out=p_out, q_out=q_out)
-
 
 def find_oltc_tap_side(n, row):
 
@@ -259,7 +259,7 @@ def find_oltc_tap_side(n, row):
     return c
 
 
-def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, i):
+def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre):
     """
     On Load Tap Changer Transformer (OLTC). Supports three conditions. 1. if no
     bus is give as controled bus to "ctrl_buses" attribute of transformer, OLTC	
@@ -294,6 +294,7 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, i):
 
     """
     for ind in index:
+        tap_changed = False
         row = n.transformers.loc[ind]
         # c is contant to consider tap side issue in the end
         c = find_oltc_tap_side(n, row)
@@ -322,11 +323,14 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, i):
         # node, and recalculte admittance matrix.
         n.transformers_t.opt_tap_position.loc[snapshot, ind] = opt_tap
         if current_tap != opt_tap:
+            tap_changed = True
             n.transformers.loc[ind, 'tap_position'] = opt_tap
             ratio = (row['tap_ratio'] + (opt_tap - current_tap)*c*tap_step/100)
             n.transformers.loc[ind, 'tap_ratio'] = ratio
-            # TODO Hey jkaehler: I will take care of "calculate_Y" after after my thesis to save some time for writing.
+            # TODO I will dig into "calculate_Y" to extract only the needed part after after my thesis since it needs more work.
             calculate_Y(sub_network, skip_pre=skip_pre)
+
+    return tap_changed
 
 
 def find_taps_tap_steps(n, snapshot, index, row, ind):
@@ -551,8 +555,9 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
     injection in MW.
     """
     # required parameters
-# TODO Hey jkaehler what is your idea?  dynamic damper for convergence of this controller
-    # dy_damper = np.select([n_trials>=30, n_trials>20, n_trials>15], [0.7, 0.8, 0.9], default=damper)
+# TODO dynamic damper for convergence of this controller, it is really helpful when oltc combined with p_v is used.
+    damper = n.df(c).loc[p_inj.index, 'damper']
+    dy_damper = np.select([n_trials>=30, n_trials>20, n_trials>15], [0.7, 0.8, 0.9], default=damper)
     v_pu_cr = n.df(c).loc[p_inj.index, 'v_pu_cr']
     v_max_curtail = n.df(c).loc[p_inj.index, 'v_max_curtail']
     # find the amount of allowed power consumption in % from the droop
@@ -561,14 +566,20 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
             100, 0, (100-(100/(v_max_curtail-v_pu_cr))*(v_pu_bus-v_pu_cr))])
 
     # find the amount of allowed power consumption in MW
-    p_out = ((pperpmax*(p_inj)) / 100)
+    p_out = ((pperpmax*(p_inj)) / 100)*dy_damper
     # update the active power contribution of the controlled indexes in network
     _set_controller_outputs_to_n(
         n, c, p_inj.index, snapshot, ctrl_p_out=True, p_out=p_out)
 
 
+def connected_bus(n, c, index, controller):
+    v_dep_buses = np.unique(n.df(c).loc[index].loc[
+        (n.df(c).loc[index].control_strategy.isin([controller])), 'bus'])
+    return v_dep_buses
+    
+
 def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
-                     voltage_difference, x_tol_outer, i, oltc_control,
+                     v_diff, x_tol_outer, token, oltc_control,
                      calculate_Y, sub_network, skip_pre):
     """
     Iterate over chosen control strategies which exist as keys and the controlled
@@ -623,40 +634,54 @@ def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
     """
     oltc = oltc_control
     v_dep_buses = np.array([])
+    token = np.select(["oltc" in dict_controlled_index and "p_v" in dict_controlled_index,
+                       "oltc" in dict_controlled_index], [token, ""], default="p_v")
+
+    switch = 1
     for controller in dict_controlled_index.keys():
         # parameter is the controlled indexes dataframe of a components
         for c, index in dict_controlled_index[controller].items():
-
+            if controller in ["p_v", "q_v"]:
+                v_dep_buses = np.unique(np.append(
+                          v_dep_buses, connected_bus(n, c, index, controller)))
             # call each controller
-            if (controller == 'fixed_cosphi') and (n_trials == 1):
+            if (controller == "fixed_cosphi") and (n_trials == 1):
                 apply_fixed_cosphi(n, now, c, index)
 
-            elif (controller == 'cosphi_p') and (n_trials == 1):
+            elif (controller == "cosphi_p") and (n_trials == 1):
                 apply_cosphi_p(n, now, c, index)
 
-            elif ((controller == 'q_v') and (voltage_difference > x_tol_outer)):
-                v_dep_buses = np.append(v_dep_buses, np.unique(n.df(c).loc[index].loc[(
-                    n.df(c).loc[index].control_strategy.isin(["q_v", "p_v"])), 'bus']))
-                apply_q_v(n, now, c, index, n_trials_max, n_trials)
+            elif controller == "q_v" and v_diff.max() > x_tol_outer:
 
-            elif ((controller == 'p_v') and (voltage_difference > x_tol_outer)):
-                apply_p_v(n, now, c, index, n_trials_max, n_trials)
-                v_dep_buses = np.append(v_dep_buses, np.unique(n.df(c).loc[index].loc[(
-                    n.df(c).loc[index].control_strategy.isin(["q_v", "p_v"])), 'bus']))
+                bus_names = connected_bus(n, c, index, "q_v")
+                if v_diff.loc[bus_names].max() > x_tol_outer: # avoids running unnecessary apply_q_v for some c where c is component.
+                    apply_q_v(n, now, c, index, n_trials_max, n_trials)
 
-            elif controller == 'oltc' and n_trials > 1:
+            elif controller == "p_v" and token == "p_v":
+                bus_names = connected_bus(n, c, index, "p_v")
+                oltc = 0
+                if v_diff.loc[bus_names].max() > x_tol_outer:
+ 
+                    apply_p_v(n, now, c, index, n_trials_max, n_trials)
 
-                switch = np.select([n_trials_max > 0, n_trials_max == 0], [
-                    voltage_difference < x_tol_outer, True])
+            elif controller == "oltc" and n_trials > 1 and token != "p_v":
+                switch = np.where(controller == "q_v", v_diff.max() < x_tol_outer, 1)
 
                 if switch:
-                    apply_oltc(n, now, index, calculate_Y, sub_network, skip_pre, i)
-                    oltc = 0
+                    tap_changed = apply_oltc(
+                        n, now, index, calculate_Y, sub_network, skip_pre)
+                    
+                    token = np.where(
+                        (not tap_changed and "p_v" in dict_controlled_index), "p_v", token)
+    
+                    oltc = np.where("p_v" in dict_controlled_index, 1, 0)
+
     # find the v_mag_pu of buses with v_dependent controller to return
     v_mag_pu_voltage_dependent_controller = n.buses_t.v_mag_pu.loc[
             now, v_dep_buses]
     
-    return v_mag_pu_voltage_dependent_controller, oltc
+    return v_mag_pu_voltage_dependent_controller, oltc, token
+
 
 
 def _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=False,
@@ -800,7 +825,7 @@ def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, o
                     c.df.loc[c.ind].loc[c.df.loc[c.ind].control == 'Slack', 'control_strategy'] = ''
                 # if voltage dep. controller exist,find the bus name
                 n_trials_max = np.where(
-                      c.df.loc[c.ind].control_strategy.isin(['q_v', 'p_v']).any(), 30, 0)
+                      c.df.loc[c.ind].control_strategy.isin(['q_v', 'p_v']).any(), 31, 0)
 
                 for i in ctrl_list[1:5]:
                     # building a dictionary for each controller if they exist
@@ -827,3 +852,4 @@ def check(dict_controlled_index, ctrl_list):
         " Supported type of controllers are:\n%s "
         "Where 'oltc' is specific for Transformer component."
         % (ctrl_list))
+

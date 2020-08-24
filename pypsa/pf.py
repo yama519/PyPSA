@@ -521,15 +521,19 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
     # prepare controllers if any and enable outer loop if voltage dependent controller present
     n_trials_max, dict_controlled_index = prepare_controlled_index_dict(network, sub_network, inverter_control, snapshots, oltc_control)
     for i, now in enumerate(snapshots):
-        voltage_difference, n_trials, n_iter_overall, oltc = (1, 0, 0, 0)
+        token = ''
+        # initial voltage difference
+        v_diff = network.buses_t.v_mag_pu.loc[now] - 0
+        n_trials, n_iter_overall, oltc = (0, 0, 0)
         start_outer = time.time()
  
-        while (voltage_difference > x_tol_outer and n_trials <= n_trials_max) or oltc:
+        while (v_diff.max() > x_tol_outer and n_trials <= n_trials_max) or oltc:
+
             n_trials += 1
             if inverter_control or oltc_control:
-                 previous_v_mag_pu_voltage_dependent_controller, oltc = apply_controller(network, now, n_trials, n_trials_max,
-                                                                                           dict_controlled_index, voltage_difference,
-                                                                                           x_tol_outer, i, oltc_control, calculate_Y, sub_network, skip_pre)
+                 old_v_mag_pu, oltc, token = apply_controller(network, now, n_trials, n_trials_max,
+                                                       dict_controlled_index, v_diff, x_tol_outer,
+                                                       token, oltc_control, calculate_Y, sub_network, skip_pre)
             p = network.buses_t.p.loc[now,buses_o]
             q = network.buses_t.q.loc[now,buses_o]
             ss[i] = s = p + 1j*q
@@ -553,10 +557,9 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
             iters[now] = n_iter
             diffs[now] = diff
             convs[now] = converged
-            # v_pu_ctrl_nodes = network.buses_t.v_mag_pu.loc[now, 'N296']
-            # print('fffffffffffffffffffffffff',i,network.buses_t.v_mag_pu)
+
             if n_trials_max > 1:
-                voltage_difference = (abs(network.buses_t.v_mag_pu.loc[now] - previous_v_mag_pu_voltage_dependent_controller)).max()
+                v_diff = (abs(network.buses_t.v_mag_pu.loc[now, old_v_mag_pu.index] - old_v_mag_pu))
         if inverter_control:
             logger.info("Newton-Raphson solved in %d iterations and %d outer loops with error of %f in %f seconds",
                 n_iter_overall, n_trials, diff, time.time() - start_outer)
