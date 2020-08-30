@@ -16,7 +16,8 @@ n.add("Bus", "LV1 bus", v_nom=.4)
 n.add("Bus", "LV2 bus", v_nom=.4)
 #n.add("Bus", "LV3 bus", v_nom=.4)
 n.add("Transformer", "MV-LV trafo", s_nom=0.63, x=0.0385161, r=0.010794, g=0.00187302,
-      bus0="MV bus", bus1="LV1 bus", oltc=True)
+      bus0="MV bus", bus1="LV1 bus", oltc=True, tap_side=1, tap_ratio=1.3, tap_position=3)
+
 n.add("Line", "LV cable", type="NAYY 4x50 SE", bus0="LV1 bus", bus1="LV2 bus", length=0.1)
 n.add("Generator", "External Grid", bus="MV bus", control="Slack")
 n.add("Generator", "test load2", bus="LV2 bus", p_set=L, s_nom=1.2, power_factor=0.1, control_strategy = '')  
@@ -33,9 +34,9 @@ def run_pf(oltc_control=False):
 # n.transformers_t.opt_tap_position
 # df = n.transformers.tap_position
 
-
+print(n.buses_t.v_mag_pu)
 
 run_pf(oltc_control=True)
 v_mag_oltc = n.buses_t.v_mag_pu
 trafodf = n.transformers
-df = n.transformers.tap_position
+df = n.transformers

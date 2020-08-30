@@ -519,21 +519,23 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
     convs = pd.Series(False, index=snapshots)
 
     # prepare controllers if any and enable outer loop if voltage dependent controller present
-    n_trials_max, dict_controlled_index = prepare_controlled_index_dict(network, sub_network, inverter_control, snapshots, oltc_control)
+    n_trials_max, dict_controlled_index = prepare_controlled_index_dict(network, sub_network, inverter_control,
+                                                                        snapshots, oltc_control)
     for i, now in enumerate(snapshots):
-        token = ''
         # initial voltage difference
+ 
         v_diff = network.buses_t.v_mag_pu.loc[now] - 0
-        n_trials, n_iter_overall, oltc = (0, 0, 0)
+        n_trials, n_iter_overall, n_iter_oltc = (0, 0, 0)
+        oltc_conv, tap_changed = (True, True)
         start_outer = time.time()
  
-        while (v_diff.max() > x_tol_outer and n_trials <= n_trials_max) or oltc:
+        while (v_diff.max() > x_tol_outer or not oltc_conv) and n_trials < n_trials_max:
 
             n_trials += 1
             if inverter_control or oltc_control:
-                 old_v_mag_pu, oltc, token = apply_controller(network, now, n_trials, n_trials_max,
-                                                       dict_controlled_index, v_diff, x_tol_outer,
-                                                       token, oltc_control, calculate_Y, sub_network, skip_pre)
+                 old_v_mag_pu, oltc_conv, n_iter_oltc, tap_changed = apply_controller(network, now, n_trials, n_trials_max,
+                                                       dict_controlled_index, v_diff, x_tol_outer, oltc_conv,
+                                                       calculate_Y, sub_network, skip_pre, i, n_iter_oltc, tap_changed)
             p = network.buses_t.p.loc[now,buses_o]
             q = network.buses_t.q.loc[now,buses_o]
             ss[i] = s = p + 1j*q
