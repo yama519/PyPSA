@@ -13,114 +13,122 @@ n.add("Bus", "MV bus", v_nom=20, v_mag_pu_set=1.02)
 n.add("Bus", "LV1 bus", v_nom=.4)
 n.add("Bus", "LV2 bus", v_nom=.4)
 #n.add("Bus", "LV3 bus", v_nom=.4)
-n.add("Transformer", "MV-LV trafo", type="0.63 MVA 10/0.4 kV", bus0="MV bus", bus1="LV1 bus", tap_side=1, tap_position=-1, oltc=True)
+n.add("Transformer", "MV-LV trafo", type="0.63 MVA 10/0.4 kV", bus0="MV bus", bus1="LV1 bus", tap_side=1, oltc=True, deadband = 2)
 n.add("Line", "LV cable", type="NAYY 4x50 SE", bus0="LV1 bus", bus1="LV2 bus", length=0.1)
 n.add("Generator", "External Grid", bus="MV bus", control="Slack")
-n.add("Load", "LV load", bus="LV1 bus", p_set=1, s_nom=1.5, power_factor_min=0.9, control_strategy = 'p_v')
+n.add("Load", "LV load", bus="LV1 bus", p_set=1, s_nom=1.5, damper=0.5, control_strategy = '')
 n.add("Load", "test load", bus="LV1 bus", p_set=0, s_nom=1.3)
-n.add("Load", "test load2", bus="LV2 bus", p_set=1, s_nom=1.2, power_factor=0.1, control_strategy = 'cosphi_p')  
-n.add("Load", "test load3", bus="LV1 bus", p_set=1, s_nom=1.3, power_factor=0.3, control_strategy = 'q_v')
-n.add("Generator", "PV", bus="LV2 bus", control="PQ", p_set =1, q_set = 0, s_nom=1.5, power_factor=0.9, control_strategy = 'fixed_cosphi')
+n.add("Load", "test load2", bus="LV2 bus", p_set=1, s_nom=1.2, power_factor=0.95, control_strategy = '')  
+n.add("Load", "test load3", bus="LV1 bus", p_set=1, s_nom=1.3, power_factor=0.95, damper = 0.7, control_strategy = '')
+n.add("Generator", "PV1", bus="LV2 bus", control="PQ", p_set=1, damper=0.2, v_pu_cr=1.02, s_nom=1.5, power_factor=0.9, control_strategy = '')
+n.add("Generator", "PV2", bus="LV1 bus", control="PQ", p_set=1, s_nom=1.5, power_factor=0.9, control_strategy = 'q_v')
 n.add("Load", "test load4", bus="LV1 bus", p_set=1, q_set=1)
 n.add("Store", "store2", bus="LV2 bus", p_set=0,q_set=0)
 n.add("StorageUnit", "store2", bus="LV2 bus", p_set=0, control_strategy = '', power_factor=0.90)
 n.add("StorageUnit", "store1", bus="LV2 bus", q_set=0, p_set=-L, control_strategy = '')
 
 n.lpf(n.snapshots)
-n.pf(use_seed=True, snapshots=n.snapshots)  # False  # True
-
-# n.transformers.oltc=True
-n.lpf(n.snapshots)
-n.pf(use_seed=True, snapshots=n.snapshots, oltc_control=False)  
+n.pf(use_seed=True, snapshots=n.snapshots, inverter_control = True, oltc_control = True)  # False  # True
 
 
+df = n.generators
+# def prepare_controlled_index_dict(n, inverter_control, snapshots, oltc_control):
+
+#     # p_set = get_switchable_as_dense(n, c, 'p_set', snapshots, c_attrs.index)
+#     n_trials_max = 0
+#     parameter_dict = {}
+#     ctrl_list = ['', 'q_v', 'p_v', 'cosphi_p', 'fixed_cosphi']
+#     if oltc_control:
+#         if (n.transformers.oltc).any():
+#             parameter_dict['oltc'] = {}
+#             parameter_dict['oltc']['Transformer'] = n.transformers.loc[(n.transformers.oltc == True)]
+
+#     if inverter_control:
+#         # loop through loads, generators, storage_units and stores if they exist
+#         for c in n.iterate_components(n.controllable_one_port_components):
 
 
-def prepare_controlled_index_dict(n, inverter_control, snapshots, oltc_control):
+#                 # exclude slack generator to be controlled
+#                 if c.list_name == 'generators':
+#                     c.df.loc[c.df.control == 'Slack', 'control_strategy'] = ''
+#                 # if voltage dep. controller exist,find the bus name
+#                 n_trials_max = np.where(
+#                       c.df.control_strategy.isin(['q_v', 'p_v']).any(), 30, 0)
 
-    # p_set = get_switchable_as_dense(n, c, 'p_set', snapshots, c_attrs.index)
-    n_trials_max = 0
-    parameter_dict = {}
-    ctrl_list = ['', 'q_v', 'p_v', 'cosphi_p', 'fixed_cosphi']
-    if oltc_control:
-        if (n.transformers.oltc).any():
-            parameter_dict['oltc'] = {}
-            parameter_dict['oltc']['Transformer'] = n.transformers.loc[(n.transformers.oltc == True)]
+#                 for i in ctrl_list[1:5]:
+#                     # building a dictionary for each controller if they exist
+#                     if (c.df.control_strategy == i).any():
+#                         if i not in parameter_dict:
+#                             parameter_dict[i] = {}
 
-    if inverter_control:
-        # loop through loads, generators, storage_units and stores if they exist
-        for c in n.iterate_components(n.controllable_one_port_components):
+#                         parameter_dict[i][c.name] = c.df.loc[(
+#                                 c.df.control_strategy == i)]
 
+#     return parameter_dict
 
-                # exclude slack generator to be controlled
-                if c.list_name == 'generators':
-                    c.df.loc[c.df.control == 'Slack', 'control_strategy'] = ''
-                # if voltage dep. controller exist,find the bus name
-                n_trials_max = np.where(
-                      c.df.control_strategy.isin(['q_v', 'p_v']).any(), 30, 0)
-
-                for i in ctrl_list[1:5]:
-                    # building a dictionary for each controller if they exist
-                    if (c.df.control_strategy == i).any():
-                        if i not in parameter_dict:
-                            parameter_dict[i] = {}
-
-                        parameter_dict[i][c.name] = c.df.loc[(
-                                c.df.control_strategy == i)]
-
-    return parameter_dict
-
-dict_controlled_index = prepare_controlled_index_dict(n, True, snapshot, True)
-import collections
+# dict_controlled_index = prepare_controlled_index_dict(n, True, snapshot, True)
+# import collections
 # dict_controlled_index = collections.OrderedDict(sorted(dict_controlled_index.items()))
 
-# opt_tap = -1
-# c = -1
-# cur_tap = 2
-# 0.91 + (opt_tap*c-cur_tap)*c*2.5/100
+# for control in dict_controlled_index.keys():
+#     print('controllllll', control)
+    
+# tap_changed = None
+# # opt_tap = -1
+# # c = -1
+# # cur_tap = 2
+# # 0.91 + (opt_tap*c-cur_tap)*c*2.5/100
 
 
-tap_step=2.5
-meas_min = 0.955205
-meas_max = 1.042984
+# tap_step=2.5
+# meas_min = 0.955205
+# meas_max = 1.042984
 
-taps = np.arange(-2, 3)
-current_tap = 2
-# taps = taps[np.where(taps!=current_tap)]
-v_min=0.95
-v_max=1.02
-tap_max = 2
-tap_min = -2
-max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
-min_voltage = meas_min-taps*tap_step/100 + current_tap*tap_step/100
+# taps = np.arange(-2, 3)
+# current_tap = 2
+# # taps = taps[np.where(taps!=current_tap)]
+# v_min=0.95
+# v_max=1.02
+# tap_max = 2
+# tap_min = -2
+# max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
+# min_voltage = meas_min-taps*tap_step/100 + current_tap*tap_step/100
 
-opt_ind = np.where(((min_voltage > v_min) & (max_voltage < v_max)))[0]
+# opt_ind = np.where(((min_voltage > v_min) & (max_voltage < v_max)))[0]
 
-if len(opt_ind) != 0:
-    opt_tap = taps[opt_ind[0]]
-else:
-    opt_ind = np.where(min_voltage > v_min)[0]
-    if len(opt_ind) != 0:
-        opt_tap = taps[len(opt_ind)-1]
-    else:
-        opt_tap = taps[0]
+# if len(opt_ind) != 0:
+#     opt_tap = taps[opt_ind[0]]
+# else:
+#     opt_ind = np.where(min_voltage > v_min)[0]
+#     if len(opt_ind) != 0:
+#         opt_tap = taps[len(opt_ind)-1]
+#     else:
+#         opt_tap = taps[0]
 
-print('optimum tap position',opt_tap)
+# print('optimum tap position',opt_tap)
 
-max_voltage = meas_max + (current_tap - taps)*tap_step/100
-max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
+# max_voltage = meas_max + (current_tap - taps)*tap_step/100
+# max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
 
-# if opt_tap > tap_max or opt_tap < tap_min:
-#     opt_tap = np.select([opt_tap > tap_max, opt_tap < tap_min],
-#                         [tap_max, tap_min])
-current_tap = 0
-# with tap 2 it is 0.91, with tap 1 it is 0.935
-(0.96 + (2-current_tap)*(-1)*tap_step/100)
+# # if opt_tap > tap_max or opt_tap < tap_min:
+# #     opt_tap = np.select([opt_tap > tap_max, opt_tap < tap_min],
+# #                         [tap_max, tap_min])
+# current_tap = 0
+# # with tap 2 it is 0.91, with tap 1 it is 0.935
+# (0.96 + (2-current_tap)*(-1)*tap_step/100)
 
 # (v_diff.max() > x_tol_outer or oltc) and n_trials < n_trials_max:
     
+### single bus control
+v_set = 1
+v_pu_ctrl_buses = 1.05
+tap_position = 0
+taps = np.arange(-2, 3)
+tap_step = 2.5
+possible_tap_res = abs(v_set-v_pu_ctrl_buses -
+                (tap_position - taps)*tap_step/100*v_set)
 
-
+opt_tap = taps[np.where(possible_tap_res == min(possible_tap_res))][0] 
 # main function of oltc
 
     # n_iter_oltc += 1
