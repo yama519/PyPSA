@@ -1,5 +1,7 @@
 """importing important libraries."""
 from .descriptors import get_switchable_as_dense
+import collections
+import re
 import logging
 import numpy as np
 logger = logging.getLogger(__name__)
@@ -247,8 +249,9 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
     _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=ctrl_p_out,
                                  ctrl_q_out=True, p_out=p_out, q_out=q_out)
 
-def find_oltc_tap_side(n, row):
 
+def find_oltc_tap_side(n, row):
+    """Find the tap_side of the controlled tranformer."""
     if row['type'] != '':
         tap_side = n.transformer_types.loc[row['type'], 'tap_side']
     else:
@@ -259,7 +262,7 @@ def find_oltc_tap_side(n, row):
     return c
 
 
-def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_oltc, n_trials, i):
+def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_oltc):
     """
     On Load Tap Changer Transformer (OLTC). Supports three conditions. 1. if no
     bus is give as controled bus to "ctrl_buses" attribute of transformer, OLTC
@@ -305,27 +308,29 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_ol
     skip_pre : bool, default False
         Skip the preliminary steps of computing topology, calculating dependent
         values and finding bus controls.
+    n_iter_oltc : integer
+        Counts the number of iteration for oltc
 
     Returns
     -------
     None.
-
     """
     n_iter_oltc += 1
-    oltc_conv = True
+    tap_changed = False
     for ind in index:
-        
+
         row = n.transformers.loc[ind]
         # c is contant to consider tap side issue in the end
         c = find_oltc_tap_side(n, row)
 
         current_tap = row['tap_position']
+
         # extracting controlled nodes names
         buses = [x.strip() for x in n.transformers.loc[ind, 'ctrl_buses'].split(',')]
-
         # if no node is chosen take node of secondary of trafo as control node
         ctrl_buses = np.where(
                 len(n.transformers.loc[ind, 'ctrl_buses']) == 0, [row['bus1']], buses)
+
         # find voltages of controlled nodes
         v_pu_ctrl_buses = n.buses_t.v_mag_pu.loc[snapshot, ctrl_buses]
         
@@ -340,14 +345,14 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_ol
                                   n, snapshot, index, ind, row, v_pu_ctrl_buses)
 
         if n_iter_oltc > 4:
-
             logger.info("==> Due to unconsistancy of oltc parameters in %s "
-            "transformer with multiple bus control, oltc is jumping around the"
-            " two tap positions %s and %s which oscilates around lower "
-            "voltage limit '%s'. To avoid under-voltage violation, oltc chooses "
-            " %s as the optimum tap position. If this is undesirable please "
-            "change the lower voltage limit 'v_min' to avoid the problem. ",
-            ind, current_tap, opt_tap, row['v_min'], current_tap)
+                        "transformer with multiple bus control, oltc is jumping "
+                        "around the two tap positions %s and %s which oscilates "
+                        "around lower voltage limit '%s'. To avoid under-voltage "
+                        "violation, oltc chooses %s as the optimum tap position."
+                        " If this is undesirable please change the lower voltage"
+                        " limit 'v_min' to avoid the problem.",
+                        ind, current_tap, opt_tap, row['v_min'], current_tap)
 
             opt_tap = np.where(
                     v_pu_ctrl_buses.min() > row['v_min'], current_tap, opt_tap)
@@ -356,21 +361,23 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_ol
 
         # Set the new tap position changed to tranformer
         if current_tap != opt_tap:
-            oltc_conv = False
+            tap_changed = True
             n.transformers.loc[ind, 'tap_position'] = opt_tap
+            n.transformers_t.opt_tap_position.loc[snapshot, ind] = opt_tap
             ratio = (row['tap_ratio'] + (opt_tap-current_tap)*c*tap_step/100)
             n.transformers.loc[ind, 'tap_ratio'] = ratio
             # TODO I will dig into "calculate_Y" after my thesis to extract only the needed part.
             calculate_Y(sub_network, skip_pre=skip_pre)
 
-        print('c_tap', current_tap, 'opt_tap', opt_tap, 'n_trials', n_trials, 'i', i)
-        print('voltage information', v_pu_ctrl_buses)
-        tap_changed = oltc_conv
-    return oltc_conv, n_iter_oltc, tap_changed
+    return  n_iter_oltc, tap_changed
 
 
 def find_taps_and_tap_step(n, snapshot, index, row, ind):
-
+    """
+    Find the the available number of taps and tap_step based on if 'type' is
+    empty or not and return them for further consideration.
+    
+    """
     # find taps and tap_steps from n.transformers or n.transformer_types
     if row['type'] != '':
         taps = (np.arange(n.transformer_types.loc[row['type'], 'tap_min'],
@@ -387,6 +394,7 @@ def trafo_single_node_ctrl(n, snapshot, index, ind, row, v_pu_ctrl_buses):
 
     opt_tap= row['tap_position']
     taps, tap_step = find_taps_and_tap_step(n, snapshot, index, row, ind)
+
     deadband_range = row['v_set'] + np.array(
                                    [row['deadband']/100, -row['deadband']/100])
 
@@ -398,8 +406,8 @@ def trafo_single_node_ctrl(n, snapshot, index, ind, row, v_pu_ctrl_buses):
                     " oltc in %s is already within the deadband range. ",
                     v_pu_ctrl_buses.index, snapshot, ind)
 
-    else:# max_voltage = meas_max + (row['tap_position'] - taps)*tap_step/100
-        possible_tap_res = abs(row['v_set']-v_pu_ctrl_buses.values +
+    else:
+        possible_tap_res = abs(row['v_set'] - v_pu_ctrl_buses.values -
                         (row['tap_position'] - taps)*tap_step/100*row['v_set'])
 
         opt_tap = taps[np.where(possible_tap_res == min(possible_tap_res))][0] 
@@ -425,37 +433,40 @@ def trafo_multiple_bus_ctrl(n, snapshot, index, ind, row, v_pu_ctrl_buses):
 
     opt_tap = row['tap_position']
     taps, tap_step = find_taps_and_tap_step(n, snapshot, index, row, ind)
-
+    # find the max and min voltage of the grid from the controlled buses
     meas_max = v_pu_ctrl_buses.values.max()
     meas_min = v_pu_ctrl_buses.values.min()
 
-    # check if meas_max and meas_min are withing the range
+    # check if meas_max and meas_min are withing the range, if not follow 'else' condition
     if (meas_min > row['v_min'] and meas_max < row['v_max']):
+        
         logger.info(" Voltage in nodes %s controlled by oltc in  %s are"
                     " already withing 'v_min' and 'v_max' ranges.",
                     v_pu_ctrl_buses.index.tolist(), ind)
         pass
 
-    # if they are not withing the range then find optimum tap as follow:
     else:
-        # max_voltage = meas_max - taps*tap_step/100 + row['tap_position']*tap_step/100
+        # calculate the possible voltage changes on meas_max and meas_min for each tap position
         max_voltage = meas_max + (row['tap_position'] - taps)*tap_step/100
-        # min_voltage = meas_min - taps*tap_step/100 + row['tap_position']*tap_step/100
         min_voltage = meas_min + (row['tap_position'] - taps)*tap_step/100
 
+        # find all the optimum indexes of tap positions
         opt_ind = np.where(((min_voltage > row['v_min']) & (
                 max_voltage < row['v_max'])))[0]
 
         if len(opt_ind) != 0:
+            # 0 implies that if multiple index exist take the first from left (neg taps first)
             opt_tap = taps[opt_ind[0]]
         else:
             opt_ind = np.where(min_voltage > row['v_min'])[0]
             if len(opt_ind) != 0:
+                # if multiple opt index exist take the last one (positive taps)
                 opt_tap = taps[len(opt_ind)-1]
 
             else:
+                # if the above is not met, then take the first tap position (neg taps are first)
                 opt_tap = taps[0]
-    
+
         logger.info("The voltage in %s controlled by oltc in %s, using "
                     " %s as the optimum tap position.",
                     v_pu_ctrl_buses.index.tolist(), ind, opt_tap)
@@ -522,6 +533,7 @@ def apply_p_v(n, snapshot, c, index, n_trials_max, n_trials):
     grid_injection = (((c == 'Load') and (np.sign(p_input) < 0).any()) or (
         (c == 'StorageUnit' or c == 'Generator' or c == 'Store') and (
             np.sign(p_input) > 0).any()))
+
     # when both consumption and injection exist, i.e. one storage_unit is
     # charging and other one is discharging ...
     if (grid_consumption & grid_injection):
@@ -599,9 +611,9 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
     injection in MW.
     """
     # required parameters
-# TODO dynamic damper for convergence of this controller, it is really helpful when oltc combined with p_v is used.
     damper = n.df(c).loc[p_inj.index, 'damper']
-    dy_damper = np.select([n_trials>=30, n_trials>20, n_trials>15], [0.7, 0.8, 0.9], default=damper)
+    damper = np.select([n_trials > 30, n_trials > 20, n_trials > 10 ],
+                       [0.3, 0.5, 0.7], default=damper)
     v_pu_cr = n.df(c).loc[p_inj.index, 'v_pu_cr']
     v_max_curtail = n.df(c).loc[p_inj.index, 'v_max_curtail']
     # find the amount of allowed power consumption in % from the droop
@@ -610,80 +622,68 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
             100, 0, (100-(100/(v_max_curtail-v_pu_cr))*(v_pu_bus-v_pu_cr))])
 
     # find the amount of allowed power consumption in MW
-    p_out = ((pperpmax*(p_inj)) / 100)*dy_damper
+    p_out = ((pperpmax*(p_inj)) / 100)*damper
     # update the active power contribution of the controlled indexes in network
     _set_controller_outputs_to_n(
         n, c, p_inj.index, snapshot, ctrl_p_out=True, p_out=p_out)
 
 
-# def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
-#                    oltc_conv, v_dep_buses, ctrl_buses):
-    
-#     if "p_v" not in dict_controlled_index:
-#         # it is actually "oltc" + "q_v"
-#         priority = np.select(
-#             [control == "oltc", control == "q_v"],
-#             [v_diff.loc[ctrl_buses].max() < x_tol_outer or not oltc_conv or ,
-#              v_diff.loc[ctrl_buses].max() > x_tol_outer and not oltc_conv], default=True)
-        
-#     if "q_v" not in dict_controlled_index: # ensures that we have "oltc + p_v"
-#         priority = np.select(
-#             [control == "oltc", control == "p_v", control == "q_v"],
-#             [v_diff.max() < x_tol_outer, oltc_conv,
-#              v_diff.loc[ctrl_buses].max() > x_tol_outer], default=True)
-    
-#     # to give same v_dep buses so that it gives zero d_diff in the next iteration
-#     v_dep_buses = np.where(control == "p_v" activation == False, )
-#                  (control == "p_v" and not oltc_conv), v_diff.index, v_dep_buses)
-#     # conditioning activation of oltc loop
-#     oltc_conv = np.where((v_diff.max() < x_tol_outer and oltc_conv), 1, 0)
-#     return priority, oltc_conv, v_dep_buses
-
-
-
 def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
-                   oltc_conv, v_dep_buses, ctrl_buses, token, n_trials, tap_changed):
-    
-    v_dep_loop_conv = v_diff.loc[ctrl_buses].max() < x_tol_outer
+                   oltc_conv, ctrl_buses, tap_changed, n_trials, prev_priority):
+    """
+    Prioritization of controller are hard coded as follow:
 
-    if "q_v" not in dict_controlled_index: # "oltc" + "p_v"
-        
-        
-        
-        # token = np.select(
-        #     [(token == "oltc" and oltc_conv and not v_dep_loop_conv),
-        #      (v_dep_loop_conv and oltc_conv)],["p_v", ""], default = 'oltc')
+    - if 'oltc' is combined with 'p_v' controller, the priority is given to,
+        'oltc', such that 'oltc' applies and converges then 'p_v' takes action
+        until it converges and finally a final load flow is run to apply both of
+        them, if the controllers settings do not conflict each other, the final
+        load flow should converge and the process jumps to the next snapshot.
 
-        # priority = np.select([control == "oltc", control == "p_v"],
-        #                      [token == "oltc", token == "p_v"], default = False)
-        
-        priority = np.select([control == "oltc" , control == "p_v"],
-                             [tap_changed == None or tap_changed,
-                              not v_dep_loop_conv and not tap_changed],# maybe remove this "v_dep_loop_conv"
-                             default = True)
+    - if 'oltc' is combined with both 'p_v' and or 'q_v', in this case 'q_v'
+        has the priority to converge and 'oltc' starts right after convergence
+        of 'q_v'. As the last resort 'p_v' will take action after convergance
+        of 'q_v' and 'oltc'. As 'p_v' also converged a last power flow is run
+        to to apply all controller, if all controllers settings do not
+        conflict each other, the final load flow should converge.
+    """
 
-        # breaking oltc_conv loop condition
-        oltc_conv = np.where(v_dep_loop_conv and not tap_changed, False, True)
-        # in case loop did not break due to v_diff, then oltc should have the priority
-        tap_changed = np.where(not oltc_conv, True, tap_changed)
-        
-    else:        
-        priority = np.select([control == "oltc" , control == "p_v", control == "q_v"],
-                             [tap_changed,  v_dep_loop_conv and tap_changed == False],
-                             default = True)
+    if "q_v" not in dict_controlled_index:  # "oltc" + "p_v"
+        priority = np.select(
+            [control == "oltc", control == "p_v"],
+            # condition for oltc activation
+            [tap_changed is None or tap_changed,
+             # condition for p_v activation
+             v_diff.max() > x_tol_outer and tap_changed is False])
 
-        # breaking oltc_conv loop condition
-        oltc_conv = np.where(v_dep_loop_conv and not tap_changed, False, True)
-        # in case loop did not break due to v_diff, then oltc should have the priority
-        tap_changed = np.where(not oltc_conv, True, tap_changed)
-        
+    else:  # ("oltc" + "p_v" + "q_v") or ("oltc" + "q_v")
+        priority = np.select(
+            [control == "oltc", control == "p_v", control == "q_v"],
+            # condition for oltc activation
+            [v_diff.max() < x_tol_outer and tap_changed is None or tap_changed,
+             # condition for p_v activation
+             tap_changed is False and v_diff.max() < x_tol_outer or
+             prev_priority == 'p_v' and v_diff.loc[ctrl_buses].max() > x_tol_outer,
+             # condition for q_v activation
+             v_diff.loc[ctrl_buses].max() > x_tol_outer and not tap_changed
+             and (prev_priority in ['', 'q_v'])])
 
-    return priority, oltc_conv, v_dep_buses
+        # copy the priority as info for the next iteration
+        prev_priority = np.where(
+            control in ["p_v", "q_v"] and priority, control, prev_priority)
+
+    # break the loop when all controllers are converged and give priority for all controller as the findal loop
+    if v_diff.max() < x_tol_outer and tap_changed is False:
+        oltc_conv = True
+        priority = True
+    else:
+        oltc_conv = False
+
+    return priority, oltc_conv, prev_priority
 
 
 def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
                      v_diff, x_tol_outer, oltc_conv, calculate_Y,
-                     sub_network, skip_pre, i, n_iter_oltc, tap_changed):
+                     sub_network, skip_pre, i, n_iter_oltc, tap_changed, prev_priority):
     """
     Iterate over chosen control strategies which exist as keys and the controlled
     indexes of each component as values in "dict_controlled_index" and call each
@@ -706,78 +706,104 @@ def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
     dict_controlled_index : dictionary
         Contains all the controlled indexes of controlled components as values
         inside "dict_controlled_index" where each controller is a key there.
-    voltage_difference : pandas series
+    v_diff : pandas series
         Voltage difference between the two iterations of the bus voltages that
         are controlled with voltage dependent controllers such as "p_v" or "q_v".
     x_tol_outer : float
         Tolerance for outer loop voltage difference between the two successive
         power flow iterations as a result of applying voltage dependent controller
         such as reactive power as a function of voltage "q_v".
-    i : integer
-        snapshot index which starts from zero.
+    oltc_conv : bool, default to None
+        It shows the convergance loop of 'oltc' controller combined with one of
+        the reactive power controller or active power curtailment control. If
+        True, it reflects that oltc combined with any control is converged if
+        not the loop will repeat.
+    calculate_Y : function
+        it calculate admmittance matrix.
     oltc_control : bool, default False
         If ``True``, activates outerloop which considers on load tap changer
         (oltc) transformer control on those transformers which their "oltc"
         attribute is activated (True).
-    calculate_Y : function
-        it calculate admmittance matrix.
     sub_network : pypsa.components.Network.sub_network
         network.sub_networks.
     skip_pre : bool, default False
         Skip the preliminary steps of computing topology, calculating dependent
         values and finding bus controls.
+    i : integer
+        snapshot index which starts from zero.
+    n_iter_oltc : integer
+        Counts the number of needed iteration for oltc convegence
+    tap_changed : bool, default None
+        It shows the oltc tap changing status and convergence alone. If tap is
+        changed is True, it implies that oltc controller did not converge yet and
+        if tap_changed is False, this reflects that oltc controller converged.
                                                          
-    Returns
+    Returns old_v_mag_pu, oltc_conv, n_iter_oltc, tap_changed
     -------
     old_v_mag_pu : pandas data frame
         Needed to compare v_mag_pu of the controlled buses with the voltage from
         previous iteration to decide for repeation of pf (in pf.py file).
-    oltc : bool
-        Deactivate outerloop repeatation for the next iteration after oltc is applied
+    oltc_conv : bool
+        It activates or deactivates the outer loop for 'oltc' and or oltc combined
+        with other controller (explained above).
+    n_iter_oltc : integer
+        The counted number iterations for oltc, it is needed to keep track of
+        oltc convergence (details is inside apply_oltc controller)
+    tap_changed : bool
+        It shows the convergance of oltc, it is need for the nex iteration
+        prioritization.
+    
     """
     v_dep_buses = np.array([])
+    ctrl_buses = np.array([])
     prioritized = True
+    # break oltc loop when oltc is not used, so that other controllers work fine alone
+    oltc_conv = np.where('oltc' in dict_controlled_index, False, True)
+    # oltc_conv = not oltc_control # keeps oltc loop running until oltc_conv is True or max trials is reached
     need_for_priority = (("q_v" in dict_controlled_index or "p_v" in dict_controlled_index)
                          and "oltc" in dict_controlled_index)
 
     for control in dict_controlled_index.keys():
         # parameter is the controlled indexes dataframe of a components
         for c, index in dict_controlled_index[control].items():
-            if control in ["p_v", "q_v"] and not need_for_priority:
+
+            if control in ["p_v", "q_v"]:
                 ctrl_buses = np.unique(n.df(c).loc[index, 'bus'])
-                
-                prioritized = v_diff.loc[ctrl_buses].max() > x_tol_outer
                 v_dep_buses = np.unique(np.append(v_dep_buses, ctrl_buses))
 
-            # if need_for_priority:
-            #     print('prioritarization activated')
-            #     prioritized, oltc_conv, v_dep_buses = prioritization(dict_controlled_index,
-            #         control, v_diff, x_tol_outer, oltc_conv, v_dep_buses, ctrl_buses)
-   
-            # call each controller
+            if need_for_priority:
+
+                prioritized, oltc_conv, prev_priority = prioritization(
+                    dict_controlled_index, control, v_diff, x_tol_outer,
+                    oltc_conv, ctrl_buses, tap_changed, n_trials, prev_priority)
+
+            # apply non voltage dependent controllers in the first trial
             if (control == "fixed_cosphi" and n_trials == 1):
                 apply_fixed_cosphi(n, now, c, index)
 
             elif (control == "cosphi_p" and n_trials == 1):
                 apply_cosphi_p(n, now, c, index)
 
+            # apply voltage dependent controller at each iteration if prioritized
             elif (control == "q_v" and prioritized):
-                print('q_vvvvvvvvvvvvv', 'trials',n_trials, i)
                 apply_q_v(n, now, c, index, n_trials_max, n_trials)
 
             elif (control == "p_v" and prioritized):
-                print('p_vvvvvvvvvvvvv', 'trials',n_trials, i)
                 apply_p_v(n, now, c, index, n_trials_max, n_trials)
 
-            elif (control == "oltc" and  prioritized and n_trials > 1):
-                print('oltccccccccccccc', 'trials',n_trials, i, 'v_deff', prioritized)
-                oltc_conv, n_iter_oltc, tap_changed = apply_oltc(
-                     n, now, index, calculate_Y, sub_network, skip_pre, n_iter_oltc, n_trials, i)
-            
+            # apply on load tap changer transforner if prioritized
+            elif (control == "oltc" and prioritized and n_trials > 1):
+                n_iter_oltc, tap_changed = apply_oltc(
+                     n, now, index, calculate_Y, sub_network, skip_pre, n_iter_oltc)
+                # break the outer loop (oltc_conv) based on transformer convergence
+                # if need_for_priority is false. 
+                oltc_conv = np.where(need_for_priority, oltc_conv, not tap_changed)
+
     # find the v_mag_pu of buses with v_dependent controller to return
     old_v_mag_pu = n.buses_t.v_mag_pu.loc[now, v_dep_buses]
-    
-    return old_v_mag_pu, oltc_conv, n_iter_oltc, tap_changed
+
+    return old_v_mag_pu, oltc_conv, n_iter_oltc, tap_changed, prev_priority
+
 
 def _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=False,
                                  ctrl_q_out=False, p_out=None, q_out=None):
@@ -846,7 +872,8 @@ def _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=False,
         n.buses_t[attr].loc[snapshot, power_change.index] += power_change
 
 
-def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, oltc_control):
+def prepare_controlled_index_dict(
+        n, sub_network, inverter_control, snapshots, oltc_control):
     """
     For components of type "Transformer", "Generator", "Load", "Store" and
     "StorageUnit" collect the indices of controlled elements in the dictionary
@@ -885,28 +912,55 @@ def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, o
     dict_controlled_index : dictionary
         dictionary that contains each controller as key and controlled indexes
         as values.
+    oltc_control : bool
+        If True activates appliation apply_controller function in pf.py file
+        which results to appliation of oltc controller, but in case of multiple
+        subnetworks if any sub network does not contain controlled tranformer
+        then oltc_control should be forced to False to avoid application of 
+        unncessary oltc action.
+    inverter_control : bool
+        If True activates appliation apply_controller function in pf.py file
+        which results to appliation of inverter controller, but in case of multiple
+        subnetworks if any sub network does not contain controlled elements
+        then inverter_control should be forced to False to avoid application of 
+        unncessary inverter control action.
     """
     dict_controlled_index = {}
     ctrl_list = ['', 'q_v', 'p_v', 'cosphi_p', 'fixed_cosphi']
-    if oltc_control:
+    if oltc_control:# res = [int(i) for i in test_string.split() if i.isdigit()]
+        # extract sub_network integer from sub_network as 'sub_n'
+        sub_n = int(re.search(r'\d+', str(sub_network)).group())
+        
+        if n.transformers.loc[n.transformers[
+                n.transformers.sub_network == str(sub_n)].index, 'oltc'].any():
 
-        if (n.transformers.oltc).any():
-            ctr_index = n.transformers[n.transformers['oltc']==True].index
+            # as controlled transformer take the one which is connected to sub_n
+            ctr_index = n.transformers[n.transformers.sub_network == str(sub_n)].index
 
             dict_controlled_index['oltc'] = {}
             dict_controlled_index['oltc']['Transformer'] = ctr_index
 
-# TODO let opt tap position be done by pf.py file (line below)
+            # TODO let opt tap position be done by pf.py file (line below)
             n.pnl('Transformer')['opt_tap_position'] = n.pnl('Transformer')[
                                  'opt_tap_position'].reindex(columns=ctr_index)
-        
-        # TODO: Hey @Jkaehler: one assertion for both for oltc control and inverter control didnt work  so i made a function which is called in both spots, hope it is ok?
-        check(dict_controlled_index, ctrl_list[1:5])
+
+            # TODO: Hey @Jkaehler: one assertion both for oltc control and inverter control didnt work  so i made a function which is called in both spots, hope it is ok?
+            # check if the entered control name spelling are correct
+            check(dict_controlled_index, ctrl_list[1:5])
+            # check if controlled buses are in the same subnetwork as the transformer
+            check_ctrl_bus_existance_in_trafo_sub_n(n, ctr_index)
+        else:
+            # oltc loop should break if some sub_networks are not controlled
+            oltc_control = False
+
     if inverter_control:
+        # deactivate the outerloop in pf.py incase no controlled element exist, (it is updated below).
+        inverter_control = False
         # loop through loads, generators, storage_units and stores if they exist
         for c in sub_network.iterate_components(n.controllable_one_port_components):
-
             if (c.df.loc[c.ind].control_strategy != '').any():
+
+                inverter_control = True
                 assert (c.df.loc[c.ind].control_strategy.isin(ctrl_list)).all(), (
                         "Not all given types of controllers are supported. "
                         "Elements with unknown controllers are:\n%s\nSupported "
@@ -916,7 +970,8 @@ def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, o
 
                 # exclude slack generator to be controlled
                 if c.list_name == 'generators':
-                    c.df.loc[c.ind].loc[c.df.loc[c.ind].control == 'Slack', 'control_strategy'] = ''
+                    c.df.loc[c.ind].loc[
+                        c.df.loc[c.ind].control == 'Slack', 'control_strategy'] = ''
                 # if voltage dep. controller exist,find the bus name
 
                 for i in ctrl_list[1:5]:
@@ -931,15 +986,22 @@ def prepare_controlled_index_dict(n, sub_network, inverter_control, snapshots, o
                 logger.info("We are in %s. These indexes are controlled:\n%s",
                             c.name, dict_controlled_index)
         check(dict_controlled_index, ctrl_list[1:5])
-        
+
     n_trials_max = np.select([("q_v" in dict_controlled_index or "p_v"
                                in dict_controlled_index), 'oltc' in
-                              dict_controlled_index], [30, 6], default = 1)
+                              dict_controlled_index], [50, 6], default = 1)
 
-    return n_trials_max, dict_controlled_index
+    dict_controlled_index = collections.OrderedDict(sorted(dict_controlled_index.items()))
+
+    return n_trials_max, dict_controlled_index, oltc_control, inverter_control
 
 
 def check(dict_controlled_index, ctrl_list):
+    """
+    If the user activates Inverter_control or oltc_control flags but forgets
+    to activate the controller inside the component then the assertion below
+    will break the power flow.
+    """
     ctrl_list.append('oltc')
     assert (bool(dict_controlled_index)), (
         "Control loop is activated but no component is controlled,"
@@ -949,3 +1011,25 @@ def check(dict_controlled_index, ctrl_list):
         "Where 'oltc' is specific for Transformer component."
         % (ctrl_list))
 
+
+def check_ctrl_bus_existance_in_trafo_sub_n(n, ctr_index):
+    """
+    Check if the givien buses as controlled buses for oltc operation do exist
+    in the same sub_network where transformer is located, if not stop the power
+    flow.
+    """
+    for ind in ctr_index:
+        row = n.transformers.loc[ind]
+
+        current_tap = row['tap_position']
+        # extracting controlled nodes names
+        buses = [x.strip() for x in n.transformers.loc[ind, 'ctrl_buses'].split(',')]
+
+        # if no node is chosen take node of secondary of trafo as control node
+        ctrl_buses = np.where(
+                len(n.transformers.loc[ind, 'ctrl_buses']) == 0, [row['bus1']], buses)
+        if row['ctrl_buses'] != '' and row['ctrl_buses'] != 'All':
+            assert (n.buses.loc[ctrl_buses, 'sub_network'] == n.transformers.loc[
+                ind, 'sub_network']).all(), ("Not all the controlled buses %s, exist"
+                " in the same sub_network of '%s' transformer, please choose the "
+                "controlled buses withing the same sub network." % (ctrl_buses, ind))
