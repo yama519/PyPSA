@@ -122,12 +122,17 @@ def apply_cosphi_p(n, snapshot, c, index):
           setpoint in MW.
         - Then controller compares "p_set_per_p_ref" with the "set_p1" and
           "set_p2" set points where set_p1 and set_p2 are percentage values.
-        - Controller decides the power factor based on the defined droop below
-          (power_factor = ...). i.e. if p_set_per_p_ref < set_p1 then power
-          factor is 1, since p_set_per_p_ref < set_p1 shows low generation and
-          controller think there might not be any need for reactive power
-          with this amount of generation, thus power_factor=1 which means q = 0.
-          For the other conditions power factor is calculated respectively.
+        - Controller decides the power factor based on the defined droop which
+          is a function of generated power (p_set).
+        - The calculated power factor is used in "ind_allowable_q" function to
+          find the amount of allowable reactive power based on the inverter
+          capacity and controller settings.
+        - Controller will take care of inverter capacity and controlls that the
+          sum of active and reactive power does not increase than the inverter
+          capacity. When reactive power need is more than what controller calculate
+          based on the provided power factor, controller decreases a portion of
+          active power to meet reactive power need, in this case controller will
+          have two outputs p_out and q_out.
     Finally the controller outpus are passed to "_set_controller_outputs_to_n"
     to update the network.
 
@@ -151,28 +156,30 @@ def apply_cosphi_p(n, snapshot, c, index):
     # parameters needed
     params = n.df(c).loc[index]
     p_input = n.pnl(c).p.loc[snapshot, index]
-
+    p_out = None
+    ctrl_p_out = False
     p_set_per_p_ref = (abs(p_input) / params['p_ref'])*100
 
     # choice of power_factor according to controller inputs and its droop curve
     power_factor = np.select([(p_set_per_p_ref < params['set_p1']), (
-        p_set_per_p_ref >= params['set_p1']) & (p_set_per_p_ref <= params['set_p2']), (
-            p_set_per_p_ref > params['set_p2'])], [1, (1 - ((1 - params['power_factor_min']) / (
-             params['set_p2'] - params['set_p1']) * (p_set_per_p_ref - params['set_p1']))), params['power_factor_min']])
+        p_set_per_p_ref >= params['set_p1']) & (
+            p_set_per_p_ref <= params['set_p2']), (
+            p_set_per_p_ref > params['set_p2'])],
+                [1, (1 - ((1 - params['power_factor_min']) / (
+             params['set_p2'] - params['set_p1']) * (
+                 p_set_per_p_ref - params['set_p1']))),
+                 params['power_factor_min']])
 
+    q_inv_cap, q_allowable, q = find_allowable_q(p_input, power_factor, params['s_nom'])
     # find q_set and avoid -0 apperance as the output when power_factor = 1
-    q_out = np.where(power_factor == 1, 0, -p_input.mul(np.tan((np.arccos(
-                          power_factor, dtype=np.float64)), dtype=np.float64)))
+    q_out = np.where(power_factor == 1, 0, -q_allowable)
 
-    S = np.sqrt((p_input)**2 + q_out**2)
-    assert ((S < params['s_nom']).any().any()), (
-        "The resulting reactive power (q)  while using 'cosphi'_p control  "
-        "with the chosen attr 'power_factor_min' in '%s' component results a  "
-        "complex power (S = sqrt(p**2 + q**2))) which is greater than 's_nom') "
-        "of the inverter, please choose the right power_factor_min value" % (c))
+    if (q > q_inv_cap).any().any():
+        ctrl_p_out = True
+        p_out = adjust_p_set(params['s_nom'], q, p_input, c, 'q_v')
 
-    _set_controller_outputs_to_n(
-        n, c, index, snapshot, ctrl_q_out=True, q_out=q_out)
+    _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=ctrl_p_out,
+                                 ctrl_q_out=True, p_out=p_out, q_out=q_out)
 
 
 def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
@@ -234,10 +241,15 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
     dy_damper = np.select([n_trials>=45, n_trials>=40, n_trials>=30, n_trials>20, n_trials>15], [0.1, 0.3, 0.5, 0.8, 0.9], default=params[
             'damper'])
     # calculation of maximum q compensation in % based on bus v_pu_bus
-    curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']), (v_pu_bus >= params['v1']) & (
-            v_pu_bus <= params['v2']), (v_pu_bus > params['v2']) & (v_pu_bus <= params['v3']), (v_pu_bus > params['v3'])
-        & (v_pu_bus <= params['v4']), (v_pu_bus > params['v4'])], [100, 100 - 100 / (params['v2'] - params['v1']) * (
-                v_pu_bus - params['v1']), 0, -100 * (v_pu_bus - params['v3']) / (params['v4'] - params['v3']), -100])
+    curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']),
+                                           (v_pu_bus >= params['v1']) & (
+            v_pu_bus <= params['v2']), (v_pu_bus > params['v2']) & (
+                v_pu_bus <= params['v3']), (v_pu_bus > params['v3'])
+        & (v_pu_bus <= params['v4']), (v_pu_bus > params['v4'])],
+                [100, 100 - 100 / (params['v2'] - params['v1']) * (
+                v_pu_bus - params['v1']), 0, -100 * (v_pu_bus - params['v3']) / (
+                    params['v4'] - params['v3']), -100])
+
     # calculation of q
     q_out = (((curve_q_set_in_percentage * q_allowable) / 100) * params[
             'damper'] * params['sign'])*dy_damper
