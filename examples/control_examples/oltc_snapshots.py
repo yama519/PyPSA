@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 
 from __future__ import print_function, division
 import pandas as pd
@@ -16,7 +15,7 @@ n.add("Bus", "LV1 bus", v_nom=.4)
 n.add("Bus", "LV2 bus", v_nom=.4)
 #n.add("Bus", "LV3 bus", v_nom=.4)
 n.add("Transformer", "MV-LV trafo", s_nom=0.63, x=0.0385161, r=0.010794, g=0.00187302,
-      bus0="MV bus", bus1="LV1 bus", oltc=True, tap_side=1, tap_ratio=1.3, tap_position=3)
+      bus0="MV bus", bus1="LV1 bus", oltc=True, tap_side=0)
 
 n.add("Line", "LV cable", type="NAYY 4x50 SE", bus0="LV1 bus", bus1="LV2 bus", length=0.1)
 n.add("Generator", "External Grid", bus="MV bus", control="Slack")

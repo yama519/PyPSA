@@ -49,7 +49,8 @@ n.lpf(n.snapshots)
 n.pf(use_seed=True, snapshots=n.snapshots, x_tol_outer=1e-4, inverter_control=True)
 
 # saving the necessary results for plotting controller behavior
-Results_power_factor = np.cos(np.arctan(n.generators_t.q.loc[:, 'My Gen 1':'My Gen 28']/n.generators_t.p.loc[:, 'My Gen 1':'My Gen 28']))
+Results_power_factor = np.cos(np.arctan(
+    n.generators_t.q.loc[:, 'My Gen 1':'My Gen 28']/n.generators_t.p.loc[:, 'My Gen 1':'My Gen 28']))
 
 Results_power_injection_percent = n.generators_t.p.loc[:, 'My Gen 1':'My Gen 28'] / (
         n.generators.loc['My Gen 1':'My Gen 28', 'p_ref'])*100

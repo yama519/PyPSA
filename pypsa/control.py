@@ -122,12 +122,17 @@ def apply_cosphi_p(n, snapshot, c, index):
           setpoint in MW.
         - Then controller compares "p_set_per_p_ref" with the "set_p1" and
           "set_p2" set points where set_p1 and set_p2 are percentage values.
-        - Controller decides the power factor based on the defined droop below
-          (power_factor = ...). i.e. if p_set_per_p_ref < set_p1 then power
-          factor is 1, since p_set_per_p_ref < set_p1 shows low generation and
-          controller think there might not be any need for reactive power
-          with this amount of generation, thus power_factor=1 which means q = 0.
-          For the other conditions power factor is calculated respectively.
+        - Controller decides the power factor based on the defined droop which
+          is a function of generated power (p_set).
+        - The calculated power factor is used in "ind_allowable_q" function to
+          find the amount of allowable reactive power based on the inverter
+          capacity and controller settings.
+        - Controller will take care of inverter capacity and controlls that the
+          sum of active and reactive power does not increase than the inverter
+          capacity. When reactive power need is more than what controller calculate
+          based on the provided power factor, controller decreases a portion of
+          active power to meet reactive power need, in this case controller will
+          have two outputs p_out and q_out.
     Finally the controller outpus are passed to "_set_controller_outputs_to_n"
     to update the network.
 
@@ -151,28 +156,31 @@ def apply_cosphi_p(n, snapshot, c, index):
     # parameters needed
     params = n.df(c).loc[index]
     p_input = n.pnl(c).p.loc[snapshot, index]
-    # TODO: it would be better to change p_ref to s_nom which will lead to removing p_ref completely
+=======
+    p_out = None
+    ctrl_p_out = False
     p_set_per_p_ref = (abs(p_input) / params['p_ref'])*100
 
     # choice of power_factor according to controller inputs and its droop curve
     power_factor = np.select([(p_set_per_p_ref < params['set_p1']), (
-        p_set_per_p_ref >= params['set_p1']) & (p_set_per_p_ref <= params['set_p2']), (
-            p_set_per_p_ref > params['set_p2'])], [1, (1 - ((1 - params['power_factor_min']) / (
-             params['set_p2'] - params['set_p1']) * (p_set_per_p_ref - params['set_p1']))), params['power_factor_min']])
+        p_set_per_p_ref >= params['set_p1']) & (
+            p_set_per_p_ref <= params['set_p2']), (
+            p_set_per_p_ref > params['set_p2'])],
+                [1, (1 - ((1 - params['power_factor_min']) / (
+             params['set_p2'] - params['set_p1']) * (
+                 p_set_per_p_ref - params['set_p1']))),
+                 params['power_factor_min']])
 
+    q_inv_cap, q_allowable, q = find_allowable_q(p_input, power_factor, params['s_nom'])
     # find q_set and avoid -0 apperance as the output when power_factor = 1
-    q_out = np.where(power_factor == 1, 0, -p_input.mul(np.tan((np.arccos(
-                          power_factor, dtype=np.float64)), dtype=np.float64)))
+    q_out = np.where(power_factor == 1, 0, -q_allowable)
 
-    S = np.sqrt((p_input)**2 + q_out**2)
-    assert ((S < params['s_nom']).any().any()), (
-        "The resulting reactive power (q)  while using 'cosphi'_p control  "
-        "with the chosen attr 'power_factor_min' in '%s' component results a  "
-        "complex power (S = sqrt(p**2 + q**2))) which is greater than 's_nom') "
-        "of the inverter, please choose the right power_factor_min value" % (c))
+    if (q > q_inv_cap).any().any():
+        ctrl_p_out = True
+        p_out = adjust_p_set(params['s_nom'], q, p_input, c, 'q_v')
 
-    _set_controller_outputs_to_n(
-        n, c, index, snapshot, ctrl_q_out=True, q_out=q_out)
+    _set_controller_outputs_to_n(n, c, index, snapshot, ctrl_p_out=ctrl_p_out,
+                                 ctrl_q_out=True, p_out=p_out, q_out=q_out)
 
 
 def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
@@ -235,10 +243,15 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
                           [0.1, 0.3, 0.5, 0.8, 0.9], default=params[
             'damper'])
     # calculation of maximum q compensation in % based on bus v_pu_bus
-    curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']), (v_pu_bus >= params['v1']) & (
-            v_pu_bus <= params['v2']), (v_pu_bus > params['v2']) & (v_pu_bus <= params['v3']), (v_pu_bus > params['v3'])
-        & (v_pu_bus <= params['v4']), (v_pu_bus > params['v4'])], [100, 100 - 100 / (params['v2'] - params['v1']) * (
-                v_pu_bus - params['v1']), 0, -100 * (v_pu_bus - params['v3']) / (params['v4'] - params['v3']), -100])
+    curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']),
+                                           (v_pu_bus >= params['v1']) & (
+            v_pu_bus <= params['v2']), (v_pu_bus > params['v2']) & (
+                v_pu_bus <= params['v3']), (v_pu_bus > params['v3'])
+        & (v_pu_bus <= params['v4']), (v_pu_bus > params['v4'])],
+                [100, 100 - 100 / (params['v2'] - params['v1']) * (
+                v_pu_bus - params['v1']), 0, -100 * (v_pu_bus - params['v3']) / (
+                    params['v4'] - params['v3']), -100])
+
     # calculation of q
     q_out = (((curve_q_set_in_percentage * q_allowable) / 100) * params[
             'damper'] * params['sign'])*dy_damper
@@ -369,6 +382,7 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_ol
             n.transformers.loc[ind, 'tap_ratio'] = ratio
             # TODO I will dig into "calculate_Y" after my thesis to extract only the needed part.
             calculate_Y(sub_network, skip_pre=skip_pre)
+
 
     return  n_iter_oltc, tap_changed
 
@@ -613,8 +627,7 @@ def calculate_injection_p(v_pu_bus, p_inj, c, n, snapshot, n_trials):
     """
     # required parameters
     damper = n.df(c).loc[p_inj.index, 'damper']
-    damper = np.select([n_trials > 30, n_trials > 20, n_trials > 10 ],
-                       [0.3, 0.5, 0.7], default=damper)
+
     v_pu_cr = n.df(c).loc[p_inj.index, 'v_pu_cr']
     v_max_curtail = n.df(c).loc[p_inj.index, 'v_max_curtail']
     # find the amount of allowed power consumption in % from the droop
@@ -648,6 +661,7 @@ def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
         conflict each other, the final load flow should converge.
     """
 
+
     if "q_v" not in dict_controlled_index:  # "oltc" + "p_v"
         priority = np.select(
             [control == "oltc", control == "p_v"],
@@ -672,6 +686,31 @@ def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
         prev_priority = np.where(
             control in ["p_v", "q_v"] and priority, control, prev_priority)
 
+
+    if "q_v" not in dict_controlled_index:  # "oltc" + "p_v"
+        priority = np.select(
+            [control == "oltc", control == "p_v"],
+            # condition for oltc activation
+            [tap_changed is None or tap_changed,
+             # condition for p_v activation
+             v_diff.max() > x_tol_outer and tap_changed is False])
+
+    else:  # ("oltc" + "p_v" + "q_v") or ("oltc" + "q_v")
+        priority = np.select(
+            [control == "oltc", control == "p_v", control == "q_v"],
+            # condition for oltc activation
+            [v_diff.max() < x_tol_outer and tap_changed is None or tap_changed,
+             # condition for p_v activation
+             tap_changed is False and v_diff.max() < x_tol_outer or
+             prev_priority == 'p_v' and v_diff.loc[ctrl_buses].max() > x_tol_outer,
+             # condition for q_v activation
+             v_diff.loc[ctrl_buses].max() > x_tol_outer and not tap_changed
+             and (prev_priority in ['', 'q_v'])])
+        
+        prev_priority = np.where(
+            control in ["p_v", "q_v"] and priority, control, prev_priority)
+
+
     # break the loop when all controllers are converged and give priority for all controller as the findal loop
     if v_diff.max() < x_tol_outer and tap_changed is False:
         oltc_conv = True
@@ -679,6 +718,10 @@ def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
     else:
         oltc_conv = False
 
+
+    print('  ')
+    print('priority = ', priority, 'control = ', control, 'trials = ', n_trials, 'v_diff = ', v_diff.max(), 'pre_priority', prev_priority)
+    print('  ')
     return priority, oltc_conv, prev_priority
 
 
@@ -787,13 +830,20 @@ def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
 
             # apply voltage dependent controller at each iteration if prioritized
             elif (control == "q_v" and prioritized):
+
                 apply_q_v(n, now, c, index, n_trials_max, n_trials)
 
             elif (control == "p_v" and prioritized):
+
+                apply_q_v(n, now, c, index, n_trials_max, n_trials)
+
+            elif (control == "p_v" and prioritized):
+
                 apply_p_v(n, now, c, index, n_trials_max, n_trials)
 
             # apply on load tap changer transforner if prioritized
             elif (control == "oltc" and prioritized and n_trials > 1):
+
                 n_iter_oltc, tap_changed = apply_oltc(
                      n, now, index, calculate_Y, sub_network, skip_pre, n_iter_oltc)
                 # break the outer loop (oltc_conv) based on transformer convergence
@@ -935,9 +985,14 @@ def prepare_controlled_index_dict(
         if n.transformers.loc[n.transformers[
                 n.transformers.sub_network == str(sub_n)].index, 'oltc'].any():
 
+
             # as controlled transformer take the one which is connected to sub_n
             ctr_index = n.transformers[n.transformers.sub_network == str(sub_n)].index
 
+
+            # as controlled transformer take the one which is connected to sub_n
+            ctr_index = n.transformers[n.transformers.sub_network == str(sub_n)].index
+            # print('sub_network inside if statement', sub_network)
             dict_controlled_index['oltc'] = {}
             dict_controlled_index['oltc']['Transformer'] = ctr_index
 
@@ -991,6 +1046,7 @@ def prepare_controlled_index_dict(
     n_trials_max = np.select([("q_v" in dict_controlled_index or "p_v"
                                in dict_controlled_index), 'oltc' in
                               dict_controlled_index], [50, 6], default = 1)
+
 
     dict_controlled_index = collections.OrderedDict(sorted(dict_controlled_index.items()))
 

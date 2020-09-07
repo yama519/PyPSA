@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from __future__ import print_function, division
 import pandas as pd
 import pypsa
@@ -34,6 +35,46 @@ n.pf(use_seed=True, snapshots=n.snapshots, inverter_control= True)  # False  # T
 
 
 
+=======
+# from __future__ import print_function, division
+# import os
+# import sys
+# import pandas as pd
+# import pypsa
+# import numpy as np
+
+# from pypsa.descriptors import get_switchable_as_iter
+# git_folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# import_name = os.path.join(git_folder, 'Otput')
+# snapshot = pd.date_range(start="2020-01-01 00:00", end="2020-01-01 12:00",  periods=1)
+# L = pd.Series([-1]*1, snapshot)
+
+# n = pypsa.Network()
+# n.set_snapshots(snapshot)
+# n.add("Bus", "MV bus", v_nom=20, v_mag_pu_set=1.02)
+# n.add("Bus", "LV1 bus", v_nom=.4)
+# n.add("Bus", "LV2 bus", v_nom=.4)
+# #n.add("Bus", "LV3 bus", v_nom=.4)
+# n.add("Transformer", "MV-LV trafo", type="0.63 MVA 10/0.4 kV", bus0="MV bus", bus1="LV1 bus", tap_side=1, oltc=True, deadband = 2)
+# n.add("Line", "LV cable", type="NAYY 4x50 SE", bus0="LV1 bus", bus1="LV2 bus", length=0.1)
+# n.add("Generator", "External Grid", bus="MV bus", control="Slack")
+# n.add("Load", "LV load", bus="LV1 bus", p_set=1, s_nom=1.5, damper=0.5, control_strategy = '')
+# n.add("Load", "test load", bus="LV1 bus", p_set=0, s_nom=1.3)
+# n.add("Load", "test load2", bus="LV2 bus", p_set=1, s_nom=1.2, power_factor=0.95, control_strategy = '')  
+# n.add("Load", "test load3", bus="LV1 bus", p_set=1, s_nom=1.3, power_factor=0.95, damper = 0.7, control_strategy = '')
+# n.add("Generator", "PV1", bus="LV2 bus", control="PQ", p_set=1, damper=0.2, v_pu_cr=1.02, s_nom=1.5, power_factor=0.9, control_strategy = '')
+# n.add("Generator", "PV2", bus="LV1 bus", control="PQ", p_set=1, s_nom=1.5, power_factor=0.9, control_strategy = 'q_v')
+# n.add("Load", "test load4", bus="LV1 bus", p_set=1, q_set=1)
+# n.add("Store", "store2", bus="LV2 bus", p_set=0,q_set=0)
+# n.add("StorageUnit", "store2", bus="LV2 bus", p_set=0, control_strategy = '', power_factor=0.90)
+# n.add("StorageUnit", "store1", bus="LV2 bus", q_set=0, p_set=-L, control_strategy = '')
+
+# n.lpf(n.snapshots)
+# n.pf(use_seed=True, snapshots=n.snapshots, inverter_control = False, oltc_control = False)  # False  # True
+
+
+# df = n.generators
+>>>>>>> 90e8e9101fc84913dea56454e077572d31ec3269
 # def prepare_controlled_index_dict(n, inverter_control, snapshots, oltc_control):
 
 #     # p_set = get_switchable_as_dense(n, c, 'p_set', snapshots, c_attrs.index)
@@ -68,6 +109,7 @@ n.pf(use_seed=True, snapshots=n.snapshots, inverter_control= True)  # False  # T
 
 #     return parameter_dict
 
+<<<<<<< HEAD
 # def injection_curtailment(v_pu_bus, v_pu_cr, v_max_curtail, p_inj):
     
 #     pperpmax = np.select([(v_pu_bus < v_pu_cr), (v_pu_bus > v_max_curtail), (
@@ -120,9 +162,71 @@ n.pf(use_seed=True, snapshots=n.snapshots, inverter_control= True)  # False  # T
 # (0.96 + (2-current_tap)*(-1)*tap_step/100)
 
 # (v_diff.max() > x_tol_outer or oltc) and n_trials < n_trials_max:
+=======
+# dict_controlled_index = prepare_controlled_index_dict(n, True, snapshot, True)
+# import collections
+# dict_controlled_index = collections.OrderedDict(sorted(dict_controlled_index.items()))
+
+# for control in dict_controlled_index.keys():
+#     print('controllllll', control)
+>>>>>>> 90e8e9101fc84913dea56454e077572d31ec3269
     
+# tap_changed = None
+# # opt_tap = -1
+# # c = -1
+# # cur_tap = 2
+# # 0.91 + (opt_tap*c-cur_tap)*c*2.5/100
 
 
+# tap_step=2.5
+# meas_min = 0.955205
+# meas_max = 1.042984
+
+# taps = np.arange(-2, 3)
+# current_tap = 2
+# # taps = taps[np.where(taps!=current_tap)]
+# v_min=0.95
+# v_max=1.02
+# tap_max = 2
+# tap_min = -2
+# max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
+# min_voltage = meas_min-taps*tap_step/100 + current_tap*tap_step/100
+
+# opt_ind = np.where(((min_voltage > v_min) & (max_voltage < v_max)))[0]
+
+# if len(opt_ind) != 0:
+#     opt_tap = taps[opt_ind[0]]
+# else:
+#     opt_ind = np.where(min_voltage > v_min)[0]
+#     if len(opt_ind) != 0:
+#         opt_tap = taps[len(opt_ind)-1]
+#     else:
+#         opt_tap = taps[0]
+
+# print('optimum tap position',opt_tap)
+
+# max_voltage = meas_max + (current_tap - taps)*tap_step/100
+# max_voltage = meas_max-taps*tap_step/100 + current_tap*tap_step/100
+
+# # if opt_tap > tap_max or opt_tap < tap_min:
+# #     opt_tap = np.select([opt_tap > tap_max, opt_tap < tap_min],
+# #                         [tap_max, tap_min])
+# current_tap = 0
+# # with tap 2 it is 0.91, with tap 1 it is 0.935
+# (0.96 + (2-current_tap)*(-1)*tap_step/100)
+
+# (v_diff.max() > x_tol_outer or oltc) and n_trials < n_trials_max:
+    
+### single bus control
+# v_set = 1
+# v_pu_ctrl_buses = 1.05
+# tap_position = 0
+# taps = np.arange(-2, 3)
+# tap_step = 2.5
+# possible_tap_res = abs(v_set-v_pu_ctrl_buses -
+#                 (tap_position - taps)*tap_step/100*v_set)
+
+# opt_tap = taps[np.where(possible_tap_res == min(possible_tap_res))][0] 
 # main function of oltc
 
     # n_iter_oltc += 1
@@ -237,4 +341,84 @@ n.pf(use_seed=True, snapshots=n.snapshots, inverter_control= True)  # False  # T
     # opt_tap = np.where(
     #         v_pu_ctrl_buses.min() > row['v_min'], current_tap, opt_tap)
 
+<<<<<<< HEAD
     
+=======
+
+##########    SIMULATION ENVIRONMENT    ##########
+# important for exporting the data
+    # Result_folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # export = os.path.join(Result_folder, 'Graphics', control_type)
+    
+# calculate the nember of generators
+# all_cur_pv_plants = n.generators.loc[n.generators.control == 'PQ']
+# num_of_pv_plants = len(all_cur_pv_plants)
+# occupied_buses = np.unique(all_cur_pv_plants.bus.values)
+# all_grid_buses = n.buses.loc[n.buses.control == 'PQ'].index
+
+
+# available_buses = all_grid_buses.difference(occupied_buses)
+# num_of_new_pv_plants_scen_30 = round(num_of_pv_plants*1.3 - num_of_pv_plants)
+# num_of_new_pv_plants_scen_173 = round(num_of_pv_plants*2.73 - num_of_pv_plants)
+
+# network.madd("Generator", ["gen 1", "load 2"], bus=["1","2"], p_set=np.random.rand(len(network.snapshots),2))
+
+
+# import time
+# def is_prime(n):
+#       if (n <= 1) : 
+#           return 'not a prime number'
+#       if (n <= 3) : 
+#           return 'prime number'
+          
+#       if (n % 2 == 0 or n % 3 == 0) : 
+#           return 'not a prime number'
+    
+#       i = 5
+#       while(i * i <= n) : 
+#           if (n % i == 0 or n % (i + 2) == 0) : 
+#               return 'not a prime number'
+#           i = i + 6
+    
+#       return 'prime number'
+    
+# starttime = time.time()
+# for i in range(1,10):
+#     time.sleep(2)
+#     print('{} is {} number'.format(i, is_prime(i)))
+# print()    
+# print('Time taken = {} seconds'.format(time.time() - starttime))    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+>>>>>>> 90e8e9101fc84913dea56454e077572d31ec3269
