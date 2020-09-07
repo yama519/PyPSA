@@ -223,8 +223,6 @@ for which the currents and voltages are related by:
 
 
 
-
-
 Non-linear power flow for DC networks
 -------------------------------------
 
@@ -298,6 +296,241 @@ line.{p0, q0, p1, q1}
 transformer.{p0, q0, p1, q1}
 
 link.{p0, p1}
+
+Introduction of Inverter Control Strategies for Non linear Power Flow
+======================================
+Distributed inverter control to avoid grid voltage violations due to integration
+of Renewable Energy technologies is proved to be effective and show potentials to
+avoid further grid restructuring and investment.
+Inverters are semi-conductor devices and are used for conversion of Direct Current DC
+to Alternate Current AC, traditionally under unity power factor. But inverters can operate
+under any power factor by changing the phase angle between their voltage and current outputs
+using the power electronic devices. This characteristic enables DER inverters and EV chargers
+stations to support the grid in terms of reactive power compensation under the chosen control type.
+Reactive power compensation from inverters can avoids overvoltage due to interation of reneables
+and undervoltage issues in the grid. Inverter reactive power capacity can be flexible and provide
+both capacitive and inductive reactive power support based on grid need and type of control strategy.
+
+Inverters are also capable of controlling active generation or consumption
+to or from the grid which is a very power full technique to avoid voltage violations
+in electrical distribution network.
+
+Fix power factor controller (fixed_cosphi)
+------------------
+In this strategy, the power factor of the inverter is ﬁxed to a value usually based
+on agreement between power producer and Distribution System Operator (DSO) under regulatory
+framework.
+
+The following formula is used to calculate the amount of reactive power compensation.
+.. math::
+   q = p_set\times\tan(\arccos(power_factor))
+
+where p_set is the amount generation and power_factor is a constant value, which is the ratio
+between the active and apparent power of the inverter. The figure below depicts the choice of
+power factor and the corresponding amount of reactive power compensation under different generations.
+
+.. image:: img/Fix_power_factor_controller.png
+
+
+Power Factor as Function of Active Power Controller (cosphi_p)
+------------------
+This method is diﬀerent from the ﬁxed power factor method, since power factor is not
+fixed anymore and controller starts compensation after certain amount of generation.
+Also it checks the amount of generation and chooses a power factor for it respectively.
+
+First controller finds out the amount generated power with refrence to the chosen "p_ref"
+using the following:
+
+.. math::
+
+   generation_percentage = \frac{p_set}{p_ref}\times100
+
+Then generation percentage is checked in the controller droop characteritic to find the right zone for power factor calculation as shown in the figure below.
+
+.. image:: img/power_factor_as_function_p.PNG
+
+As can be seen in the figure there are three zones for power factor calculation according to "generation percentage" value calculated above.
+According to the figure, for zone one power factor is always 1, for zone 3 power factor is always "power_factor_min" or minimum defined power factor,
+for zone 2 power factor is calculated as follow:
+
+.. math::
+   power_factor = 1 - \frac{1 - powerfactor_min}{set_2_p - set_1_p}\times\frac{p_set}{p_ref}-set_1_p))
+
+Once power factor is determined the following formula is used to calculate the reactive power compensation amount:
+
+.. math::
+   q = p_set\times\tan(\arccos(power_factor))
+
+Where "p_set" is the generation amount and "power_factor" is the power factor value in this controller.
+
+Reactive power as function of voltage inverter controller (q_v)
+------------------
+This inverter control method utilizes its available amount reactive power very efficiently than the other
+two controllers when it comes to reactive power compensation, such that it provides reactive power support
+based on voltage information of the bus where this inverter is connected to, this way it avoids unnecessary reactive
+power compensations. For this purpose the droop characteristic for reactive power calculation for this controller
+is divided in to 5 zones as shown in 
+
+.. image:: img/q_v_controller.png
+
+As can be seen in the figure, controller parameters v1, v2, v3, v4 form the droop characteristic curve
+and divides the reactive power compensation into 5 zones in terms of percentage values.
+
+zone1: if :math:`v_pu_bus < v1`
+
+.. math::
+   q_zone = 100
+   
+
+zone2: if :math:`v2 < v_pu_bus  <= v3`
+
+.. math::
+   q_zone= (100 - \frac{100}{v2 - v1}\times(v_pu_bus-v1))
+
+zone3: This is the reference point for controller, meaning that controller recognizes
+this zone as the zone where bus voltage is normal and no compensation is needed. Formed
+by v2 and v3 choices. Controller always tries to bring the votlage to this zone as close
+as possible. Reactive power compensation for this zone is zero.
+
+zone4: if :math:`v3 < v_pu_bus  < = v4`
+
+.. math::
+   q_zone=  - \frac{100}{v4 - v3}\times(v_pu_bus-v3)
+
+zone5: if :math:`v_pu_bus  >  v4`
+
+.. math::
+   q_zone = -100
+
+Controller checks the location of bus voltage magnitude on this curve, once the choice of right zone
+is clear, the percentage amount of reactive power is also clear (q_zone) as described above.
+Finally, the controller reactive power output is calculated using the following formula.
+
+.. math::
+   q = p_set\times\tan(\arccos(power_factor))\times q_zone\times damper
+
+damper is a connstant which takes values between 0 and 1. it is multiplied to the output
+of the controller in order to help it for convergence in case controller is not converging
+in some cases. 
+
+Controller Reactive Power Compensation Limit
+------------------
+Normally inverter size is chosen bigger than maximum generation capacity. And 
+inverter maximum available reactive power compensation is calculated using 
+q_vailable= :math:`\sqrt{s_nom^2 - p_set^2}`, inverters provide the needed reactive 
+power from part of q_available without affecting p_set when inverter capacity is big enough, as
+can be seen from the following image from SMA inverter technology https://www.sma.de/en/partners/knowledgebase/sma-shifts-the-phase.html
+
+.. image:: img/renewable_integration.PNG
+
+But sometimes when inverter fails to provide the needed reactive power due to inverter capacity (s_nom) limit.
+Then controller reduces p_set to fulfil reactive power need. This happens when s_nom < :math:`\sqrt{p_set^2 + q^2}`
+where p_set is the generation amount and q is controller reactive power compensation. In this case controller
+fulfils the needed reactive power and calculates p_set again p_set = :math:`\sqrt{s_nom^2 - q^2}` and save the result
+in n.components_t.p. But p_set reduction is limited by the provided power factor, the minimum value that 
+p_set can take is determined by p_set = :math:`\ s_nom\times power_factor`. This behavior of changing p_set to fulfil
+reactive power need (followed from CERBERUS software) does not exist for power factor as a function of active power control strategy.
+
+Droop Based Active Power Curtailment P(V)
+------------------
+Since in low voltage grid the relationship between voltage and active power is stronger than with reactive power due to highly
+resistive line characteristics, therefore active power curtailment is a powerful method to avoid voltage violation issues.
+Power curtailment is applied both in actve power injection and active power consumption modes.
+
+Active power injections can be:
+- Generator with +p_set
+- Store or StorageUnit with +p_set or discharging mode
+- Generating units connected as negative loads -p_set
+
+For grid active power injections power curtailment is divided in to three different zones as shown in the figure below.
+
+.. image:: img/Injection_power_curtailment.PNG
+
+As seen in the figure there are no power curtailments in zone 1 and P_zone = 100, meaning that 100% of the generated power can be
+injected to the grid. On the other hand in zone 3 power is curtailed 100% and P_zone = 0, meaning that no extra power is allowed
+to be injected. But in zone2 the amount of allowed power for injection is calculated from the equation below.
+
+.. math::
+   p_zone= (100 - \frac{100}{v_max_curtail - v_pu_cr}\times(v_pu_bus-v_pu_cr))
+   
+Active power consumptions can be:
+- Generators with -p_set
+- Loads with +p_set
+- Store or StorageUnit components while charging -p_set
+
+Power grid active power consumption power curtailment is divided in to three different zones as in the following figure:
+
+.. image:: img/consumption_power_curtailment.PNG
+
+As seen in the figure there are again three zones for active power curtailment in consumption  mode but note that in this
+case :math:`v_pu_cr > v_max_curtail` whereas in injection mode this relation is vice versa, as can be also differenciated
+from the figures in each mode. Same as in injection mode there are three zones, in zone 1 100% power consumption is allowed
+and p_zone=100%, thus zero curtailment, on the other hand in zone 3 no power consumption is allowed and p_zone = 0, thus 100%
+curtailment. But the amount of power consumption in zone 2 is calculated using the following droop formula.
+
+.. math::
+   p_zone= (\frac{100}{v_pu_cr - v_max_curtail}\times(v_pu_bus-v_max_curtail))
+
+Once the p_zone either in consumption mode or injection mode is determined the amount of curtailed power is calculated as:
+
+.. math::
+   p_out= p_zone\times(p_set)
+where p_out is the controller output, p_zone is the percentage amount allowed active power injection or consumption and p_set
+is the original value of generation or consumption  from any component (generators, loads, stores, storage_units)
+
+On Load Tap Changer Transformer
+------------------
+
+OLTC is a mechanical based built in device which is installed inside a power transformer in order to regulate voltage in the
+secondary side of the transformer by changing transformer tap position or winding turn’s ratio. This strategy uses the measured
+voltage magnitude information of a single bus (single node control) or multipl nodes (multiple node contol) of different locations
+and chooses the optimal tap position to maintain the uppermost and lowermost grid voltage magnitudes within the predetermined
+allowed ranges and minimizes the voltage deviation in the grid.
+
+For single node control oltc chooses an optimum tap in order to bring the controlled nodes voltage as close to "v_set" as possible,
+where "v_set" is the nominal per unit voltag of the transformer, since "tap_steps" as introduced as new attribute in transformers, are
+discreate values, therefore a convergacne range is created for transformer as follow:
+
+
+.. math::
+   deadband_range = \frac{v_set + deadband}{100}, \frac{v_set - deadband}{100}
+   
+whereas deadband is a percentage value and shows the (+ or -) percentage deviation of "v_set".
+
+For multiple node control minimum allowed voltage “v_min” and maximum allowed voltage “v_max” are used instead of “deadband” 
+In this mode controller will choose an optimum tap position from the available taps such that no bus voltage from the controlled
+nodes violate “v_min” and “v_max” values. The following chart shows the overall logic of multiple node oltc control.
+
+.. image:: img/oltc_multiple_node_control.PNG
+
+
+Inverter Control Loop
+------------------
+
+.. image:: outer_loop_pf.PNG
+
+What happens in each step:
+
+ - Step 1:Outer loop which contains application of control strategies activates, when inverter_control is
+ “True” (defaults to False) in n.pf (inverter_control = False). Outer loop applies the chosen control strategy
+ on the chosen components and updates the network.
+
+ - Step 2: Apply inverter control save the results and update the power flow inputs
+
+ - Step 3: n_trial_max is the number of power flow repetition per snapshot. It has a value of 30 trials when the 
+   type of control strategy is “q_v” and 1 for other controllers. “q_v” is a voltage dependent controller and to avoid 
+   voltage fluctuations due to reactive power compensation there is a voltage tolerance limit between the two consecutive 
+   iterations. This tolerance within the power flow loop is called “x_tol_outer”. In each power flow the maximum “v_mag_pu” 
+   difference of the current iteration and the previous iteration is compared with the x_tol_outer limit. If voltage difference 
+   is less than or equal to x_tol_outer, power flow will converge, otherwise it will keep iterating up to 30 iterations. In the
+   worst-case scenarios when it did not converge, as solution “damper” attribute is introduced which is directly multiplied to 
+   the controller output and takes values (0, 1]. Damper values less than 1 will help controller from big swings and finally lead 
+   it to converge. Another solution is changing the parameters (v1, v2, v3, v4, power_factor).
+   
+ - Step 4: In this step the resulting voltag magnitude of the buses between the current and the previous iterations
+   is compared, if the voltage difference is equal or less than x_tol_outer (tolerance chosen for outer loop convergence default to 1e-10), the
+   condition is met and the power flow ends here. If not repeat the power flow (maximum of 30 iterations) 
+  
 
 
 Introduction of Inverter Control Strategies for Non linear Power Flow

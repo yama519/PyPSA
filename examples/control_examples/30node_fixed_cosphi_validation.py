@@ -40,8 +40,13 @@ for i in range(n_buses):
 
 # setting control method
 n.generators.control_strategy = 'fixed_cosphi'
+<<<<<<< HEAD
 n.lpf()
 n.pf(use_seed=True, x_tol_outer=1e-4, inverter_control=True)
+=======
+n.lpf(n.snapshots)
+n.pf(use_seed=True, snapshots=n.snapshots, x_tol_outer=1e-4, inverter_control=True)
+>>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 
 # saving the necessary data for plotting controller behavior
 
