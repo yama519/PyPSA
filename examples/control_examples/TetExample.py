@@ -20,7 +20,8 @@ n.add("Load", "LV load", bus="LV1 bus", p_set=1, s_nom=1.5, power_factor_min=0.9
 n.add("Load", "test load", bus="LV1 bus", p_set=0, s_nom=1.3)
 n.add("Load", "test load2", bus="LV2 bus", p_set=1, s_nom=1.2, power_factor=0.1, control_strategy = '')  
 n.add("Load", "test load3", bus="LV1 bus", p_set=1, s_nom=1.3, power_factor=0.3, control_strategy = '')
-n.add("Generator", "PV", bus="LV2 bus", control="PQ", p_set =1, q_set = 0, s_nom=1.5, power_factor=0.9, control_strategy = 'q_v')
+n.add("Generator", "PV", bus="LV2 bus", control="PQ", p_set =1, q_set = 0, s_nom=1.5)
+
 n.add("Load", "test load4", bus="LV1 bus", p_set=1, q_set=1)
 n.add("Store", "store2", bus="LV2 bus", p_set=0,q_set=0)
 n.add("StorageUnit", "store2", bus="LV2 bus", p_set=0, control_strategy = '', power_factor=0.90)

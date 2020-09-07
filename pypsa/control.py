@@ -151,7 +151,7 @@ def apply_cosphi_p(n, snapshot, c, index):
     # parameters needed
     params = n.df(c).loc[index]
     p_input = n.pnl(c).p.loc[snapshot, index]
-
+    # TODO: it would be better to change p_ref to s_nom which will lead to removing p_ref completely
     p_set_per_p_ref = (abs(p_input) / params['p_ref'])*100
 
     # choice of power_factor according to controller inputs and its droop curve
@@ -231,7 +231,8 @@ def apply_q_v(n, snapshot, c, index, n_trials_max, n_trials):
     p_out = None
     ctrl_p_out = False
     q_inv_cap, q_allowable, q = find_allowable_q(p_input, params['power_factor'], params['s_nom'])
-    dy_damper = np.select([n_trials>=45, n_trials>=40, n_trials>=30, n_trials>20, n_trials>15], [0.1, 0.3, 0.5, 0.8, 0.9], default=params[
+    dy_damper = np.select([n_trials>=45, n_trials>=40, n_trials>=30, n_trials>20, n_trials>15],
+                          [0.1, 0.3, 0.5, 0.8, 0.9], default=params[
             'damper'])
     # calculation of maximum q compensation in % based on bus v_pu_bus
     curve_q_set_in_percentage = np.select([(v_pu_bus < params['v1']), (v_pu_bus >= params['v1']) & (
