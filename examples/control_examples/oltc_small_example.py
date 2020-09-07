@@ -11,11 +11,7 @@ n.add("Bus","LV1 bus",v_nom=.4)
 n.add("Bus","LV2 bus",v_nom=.4)
 
 
-<<<<<<< HEAD
 n.add("Transformer","MV-LV trafo",type="0.63 MVA 20/0.4 kV",bus0="MV bus",bus1="LV1 bus")
-=======
-n.add("Transformer","MV-LV trafo",type="0.4 MVA 20/0.4 kV",bus0="MV bus",bus1="LV1 bus")
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 
 n.add("Line","LV cable",type="NAYY 4x50 SE",bus0="LV1 bus",bus1="LV2 bus",length=0.1)
 
@@ -27,10 +23,7 @@ n.add("Load","LV load1",bus="LV1 bus",p_set=0)
 n.add("Load","LV load2",bus="LV2 bus",p_set=0)
 
 def run_pf(oltc_control=False):
-<<<<<<< HEAD
     
-=======
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
     n.lpf()
     n.pf(use_seed=True, oltc_control=oltc_control)
     if not oltc_control:
@@ -38,27 +31,20 @@ def run_pf(oltc_control=False):
         Bus_v_mag_pu['no_control'] = n.buses_t.v_mag_pu.T['now'].loc["LV1 bus":"LV2 bus"]
     if oltc_control:
         Bus_v_mag_pu['with_control'] = n.buses_t.v_mag_pu.T['now'].loc["LV1 bus":"LV2 bus"]
-<<<<<<< HEAD
 
 
 
 run_pf()
 v_mag_no = n.buses_t.v_mag_pu
-=======
-run_pf()
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 
 n.transformers.oltc = True
 n.transformers.deadband = 2
 n.transformers.tap_step = 2.5
 n.transformers.ctrl_nodes = "LV1 bus"
 run_pf(oltc_control=True)
-<<<<<<< HEAD
 v_mag_with = n.buses_t.v_mag_pu
 
 
-=======
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 
 def plot(figure):
     plt.figure(figure)
@@ -90,11 +76,8 @@ def plot(figure):
 
 plot(1)
 
-<<<<<<< HEAD
 
 n.transformers.tap_position=0
-=======
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 run_pf()
 n.transformers.oltc = True
 n.transformers.deadband = 2

@@ -519,7 +519,6 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
     convs = pd.Series(False, index=snapshots)
 
     # prepare controllers if any and enable outer loop if voltage dependent controller present
-<<<<<<< HEAD
     n_trials_max, dict_controlled_index, oltc_control, inverter_control = prepare_controlled_index_dict(network, sub_network, inverter_control,
                                                                         snapshots, oltc_control)
     for i, now in enumerate(snapshots):
@@ -537,18 +536,6 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
                  old_v_mag_pu, oltc_conv, n_iter_oltc, tap_changed, prev_priority = apply_controller(network, now, n_trials, n_trials_max,
                                                        dict_controlled_index, v_diff, x_tol_outer, oltc_conv, calculate_Y,
                                                        sub_network, skip_pre, i, n_iter_oltc, tap_changed, prev_priority)
-=======
-    n_trials_max, dict_controlled_index = prepare_controlled_index_dict(network, sub_network, inverter_control, snapshots, oltc_control)
-    for i, now in enumerate(snapshots):
-        voltage_difference, n_trials, n_iter_overall, oltc = (1, 0, 0, 0)
-        start_outer = time.time()
-        while (voltage_difference > x_tol_outer and n_trials <= n_trials_max) or oltc:
-            n_trials += 1
-            if inverter_control or oltc_control:
-                 previous_v_mag_pu_voltage_dependent_controller, oltc = apply_controller(network, now, n_trials, n_trials_max,
-                                                                                           dict_controlled_index, voltage_difference,
-                                                                                           x_tol_outer, i, oltc_control, calculate_Y, sub_network, skip_pre)
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
             p = network.buses_t.p.loc[now,buses_o]
             q = network.buses_t.q.loc[now,buses_o]
             ss[i] = s = p + 1j*q
@@ -567,27 +554,17 @@ def sub_network_pf(sub_network, snapshots=None, skip_pre=False, x_tol=1e-6, x_to
             start = time.time()
             roots[i], n_iter, diff, converged = newton_raphson_sparse(f, guess, dfdx, x_tol=x_tol, **slack_args)
             n_iter_overall += n_iter
-<<<<<<< HEAD
             if not inverter_control and not oltc_control:
-=======
-            if not inverter_control:
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
                 logger.info("Newton-Raphson solved in %d iterations with error of %f in %f seconds", n_iter,diff,time.time()-start)
             iters[now] = n_iter
             diffs[now] = diff
             convs[now] = converged
-<<<<<<< HEAD
 
             if n_trials_max > 1:
                 v_diff = (abs(network.buses_t.v_mag_pu.loc[now, old_v_mag_pu.index] - old_v_mag_pu))
             # print('inside pf.py ', 'trials',n_trials, 'oltc_conv is False', oltc_conv == False, 'oltc_conv',oltc_conv, 'v_diff', v_diff.max() > x_tol_outer)
             # print('inside pf.py, overall loop status', (v_diff.max() > x_tol_outer or oltc_conv == False) and n_trials < n_trials_max, 'oltc part', oltc_conv == False, 'oltc_conv', oltc_conv)
         if inverter_control or oltc_control:
-=======
-            if n_trials_max > 1:
-                voltage_difference = (abs(network.buses_t.v_mag_pu.loc[now] - previous_v_mag_pu_voltage_dependent_controller)).max()
-        if inverter_control:
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
             logger.info("Newton-Raphson solved in %d iterations and %d outer loops with error of %f in %f seconds",
                 n_iter_overall, n_trials, diff, time.time() - start_outer)
 

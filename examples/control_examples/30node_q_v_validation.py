@@ -47,13 +47,8 @@ for i in range(n_buses):
 
 # setting control strategy type to Q(U) controller
 n.generators.control_strategy = 'q_v'
-<<<<<<< HEAD
 n.lpf()
 n.pf(use_seed=True, x_tol_outer=1e-6, inverter_control=True)
-=======
-n.lpf(n.snapshots)
-n.pf(use_seed=True, snapshots=n.snapshots, x_tol_outer=1e-6, inverter_control=True)
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
 
 Results_v = n.buses_t.v_mag_pu.loc[:, 'My bus 1':'My bus 29']
 
@@ -119,11 +114,3 @@ plt.ylabel('Reactive power compensation Q(U) %')
 plt.show()
 end = time.time()
 print(f"Runtime of the program is {end - start}")
-<<<<<<< HEAD
-=======
-
-
-# to find the number violations
-result_count = Results_v[Results_v>1].count()
-result_count[result_count>5]
->>>>>>> fcbc694b7b5ccc3d80d271383f8fad06ac5ba1d1
