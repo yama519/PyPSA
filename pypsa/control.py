@@ -380,11 +380,6 @@ def apply_oltc(n, snapshot, index, calculate_Y, sub_network, skip_pre, n_iter_ol
             n.transformers.loc[ind, 'tap_ratio'] = ratio
             # TODO I will dig into "calculate_Y" after my thesis to extract only the needed part.
             calculate_Y(sub_network, skip_pre=skip_pre)
-        print('  ')
-        print('curr_tap', current_tap, 'opt_tap', opt_tap, 'n_trials')
-        print('  ')
-        print('voltage information', v_pu_ctrl_buses)
-        print('  ')
 
     return  n_iter_oltc, tap_changed
 
@@ -691,9 +686,7 @@ def prioritization(dict_controlled_index, control, v_diff, x_tol_outer,
         priority = True
     else:
         oltc_conv = False
-    print('  ')
-    print('priority = ', priority, 'control = ', control, 'trials = ', n_trials, 'v_diff = ', v_diff.max(), 'pre_priority', prev_priority)
-    print('  ')
+
     return priority, oltc_conv, prev_priority
 
 
@@ -802,16 +795,13 @@ def apply_controller(n, now, n_trials, n_trials_max, dict_controlled_index,
 
             # apply voltage dependent controller at each iteration if prioritized
             elif (control == "q_v" and prioritized):
-                print('qqqqqqqqqqqqqqqqq', n_trials)
                 apply_q_v(n, now, c, index, n_trials_max, n_trials)
 
             elif (control == "p_v" and prioritized):
-                print('ppppppppppppppppppp', n_trials)
                 apply_p_v(n, now, c, index, n_trials_max, n_trials)
 
             # apply on load tap changer transforner if prioritized
             elif (control == "oltc" and prioritized and n_trials > 1):
-                print('oooooooooooooooooo', n_trials)
                 n_iter_oltc, tap_changed = apply_oltc(
                      n, now, index, calculate_Y, sub_network, skip_pre, n_iter_oltc)
                 # break the outer loop (oltc_conv) based on transformer convergence
@@ -955,7 +945,6 @@ def prepare_controlled_index_dict(
 
             # as controlled transformer take the one which is connected to sub_n
             ctr_index = n.transformers[n.transformers.sub_network == str(sub_n)].index
-            # print('sub_network inside if statement', sub_network)
             dict_controlled_index['oltc'] = {}
             dict_controlled_index['oltc']['Transformer'] = ctr_index
 
@@ -978,7 +967,6 @@ def prepare_controlled_index_dict(
         # loop through loads, generators, storage_units and stores if they exist
         for c in sub_network.iterate_components(n.controllable_one_port_components):
             if (c.df.loc[c.ind].control_strategy != '').any():
-                print('expected controlled sub_n are 0 and 4', sub_network)
                 inverter_control = True
                 assert (c.df.loc[c.ind].control_strategy.isin(ctrl_list)).all(), (
                         "Not all given types of controllers are supported. "
